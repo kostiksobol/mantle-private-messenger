@@ -1,0 +1,12 @@
+{
+  "name": "mantle-private-messenger",
+  "private": true,
+  "workspaces": [
+    "blockchain",
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "compile:contracts": "npm --workspace blockchain run compile"
+  }
+}

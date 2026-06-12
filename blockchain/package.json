@@ -1,0 +1,12 @@
+{
+  "name": "@messenger/blockchain",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "hardhat compile",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "hardhat": "^3.0.0"
+  }
+}
