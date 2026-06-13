@@ -9,44 +9,22 @@ contract MainConnector {
         Agent
     }
 
-    struct Account {
-        address accountAddress;
+    struct User {
+        address userAddress;
         string login;
         string name;
         string pubkey;
         address userContract;
         AccountKind kind;
         string metadataURI;
-        bool exists;
     }
 
-    struct Record {
-        string record;
-        uint256 index;
-    }
+    User[] private users;
 
-    mapping(address => Account) private accountsByAddress;
-    mapping(bytes32 => address) private loginToAddress;
-    mapping(address => bool) private registeredUserContracts;
+    mapping(address => uint256) private addressToUserIndex;
+    mapping(bytes32 => uint256) private loginToUserIndex;
 
-    Record[] private records;
-
-    event AccountRegistered(
-        address indexed accountAddress,
-        address indexed userContract,
-        string login,
-        AccountKind kind
-    );
-
-    event RecordAdded(uint256 recordIndex);
-
-    modifier onlyRegisteredUserContract() {
-        require(
-            registeredUserContracts[msg.sender],
-            "Only registered user contract"
-        );
-        _;
-    }
+    string[] private records;
 
     function register(
         string calldata login,
@@ -55,63 +33,45 @@ contract MainConnector {
         AccountKind kind,
         string calldata metadataURI
     ) external {
-        require(!accountsByAddress[msg.sender].exists, "Already registered");
+        require(addressToUserIndex[msg.sender] == 0, "Already registered");
         require(bytes(login).length > 0, "Empty login");
 
         bytes32 loginHash = keccak256(bytes(login));
-        require(loginToAddress[loginHash] == address(0), "Login already used");
+        require(loginToUserIndex[loginHash] == 0, "Login is taken");
 
-        UserContract userContract = new UserContract(
-            msg.sender,
-            address(this)
-        );
+        UserContract userContract = new UserContract(msg.sender);
 
-        Account memory account = Account({
-            accountAddress: msg.sender,
-            login: login,
-            name: name,
-            pubkey: pubkey,
-            userContract: address(userContract),
-            kind: kind,
-            metadataURI: metadataURI,
-            exists: true
-        });
-
-        accountsByAddress[msg.sender] = account;
-        loginToAddress[loginHash] = msg.sender;
-        registeredUserContracts[address(userContract)] = true;
-
-        emit AccountRegistered(
-            msg.sender,
-            address(userContract),
-            login,
-            kind
-        );
-    }
-
-    function addRecord(
-        string calldata record,
-        uint256 index
-    ) external onlyRegisteredUserContract {
-        records.push(
-            Record({
-                record: record,
-                index: index
+        users.push(
+            User({
+                userAddress: msg.sender,
+                login: login,
+                name: name,
+                pubkey: pubkey,
+                userContract: address(userContract),
+                kind: kind,
+                metadataURI: metadataURI
             })
         );
 
-        emit RecordAdded(records.length - 1);
+        uint256 indexPlusOne = users.length;
+
+        addressToUserIndex[msg.sender] = indexPlusOne;
+        loginToUserIndex[loginHash] = indexPlusOne;
+    }
+
+    function addRecord(string calldata record) external {
+        records.push(record);
     }
 
     function getLastRecords(
         uint256 from
-    ) external view returns (Record[] memory) {
+    ) external view returns (string[] memory) {
         if (from >= records.length) {
-            return new Record[](0);
+            return new string[](0);
         }
 
         uint256 resultLength = records.length - from;
-        Record[] memory result = new Record[](resultLength);
+        string[] memory result = new string[](resultLength);
 
         for (uint256 i = 0; i < resultLength; i++) {
             result[i] = records[from + i];
@@ -121,30 +81,39 @@ contract MainConnector {
     }
 
     function getUserByAddress(
-        address accountAddress
-    ) external view returns (Account memory) {
-        require(
-            accountsByAddress[accountAddress].exists,
-            "Account not found"
-        );
+        address userAddress
+    ) external view returns (User memory) {
+        uint256 indexPlusOne = addressToUserIndex[userAddress];
 
-        return accountsByAddress[accountAddress];
+        if (indexPlusOne == 0) {
+            return emptyUser();
+        }
+
+        return users[indexPlusOne - 1];
     }
 
     function getUserByLogin(
         string calldata login
-    ) external view returns (Account memory) {
+    ) external view returns (User memory) {
         bytes32 loginHash = keccak256(bytes(login));
-        address accountAddress = loginToAddress[loginHash];
+        uint256 indexPlusOne = loginToUserIndex[loginHash];
 
-        require(accountAddress != address(0), "Account not found");
+        if (indexPlusOne == 0) {
+            return emptyUser();
+        }
 
-        return accountsByAddress[accountAddress];
+        return users[indexPlusOne - 1];
     }
 
-    function isRegisteredUserContract(
-        address userContract
-    ) external view returns (bool) {
-        return registeredUserContracts[userContract];
+    function emptyUser() private pure returns (User memory) {
+        return User({
+            userAddress: address(0),
+            login: "",
+            name: "",
+            pubkey: "",
+            userContract: address(0),
+            kind: AccountKind.Human,
+            metadataURI: ""
+        });
     }
 }
