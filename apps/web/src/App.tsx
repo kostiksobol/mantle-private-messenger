@@ -18,12 +18,13 @@ import {
 } from "./lib/contracts";
 import {
   db,
-  MAIN_CONNECTOR_RECORDS_CURSOR_KEY,
+  mainConnectorRecordsCursorKey,
   messageCursorKey,
   normalizeAddress,
   type LocalMessage,
   type LocalRecord,
 } from "./lib/db";
+import { generateRsaKeyPair, rsaDecrypt, rsaEncrypt } from "./lib/crypto";
 
 type UserStruct = {
   userAddress: Address;
@@ -39,6 +40,11 @@ type MessageStruct = {
   encryptedContent: string;
   tag: string;
   timestamp: bigint;
+};
+
+type DecryptedInvitation = {
+  recordIndex: number;
+  content: string;
 };
 
 function isEmptyAddress(address?: string) {
@@ -60,17 +66,23 @@ function App() {
 
   const [login, setLogin] = useState("alice");
   const [name, setName] = useState("Alice");
-  const [pubkey, setPubkey] = useState("demo-rsa-public-key");
+  const [pubkey, setPubkey] = useState("");
   const [kind, setKind] = useState<0 | 1>(0);
   const [metadataURI, setMetadataURI] = useState("");
 
   const [encryptedContent, setEncryptedContent] = useState("hello encrypted message");
   const [tag, setTag] = useState("demo-tag");
 
-  const [encryptedRecord, setEncryptedRecord] = useState("demo-encrypted-invitation-record");
+  const [recipientLogin, setRecipientLogin] = useState("alice");
+  const [invitationPlaintext, setInvitationPlaintext] = useState(
+    '{"type":"invitation","chatId":"demo-chat-1","note":"hello"}'
+  );
+  const [encryptedRecord, setEncryptedRecord] = useState("");
 
   const [messageSyncStatus, setMessageSyncStatus] = useState("");
   const [recordSyncStatus, setRecordSyncStatus] = useState("");
+  const [cryptoStatus, setCryptoStatus] = useState("");
+  const [decryptedInvitations, setDecryptedInvitations] = useState<DecryptedInvitation[]>([]);
 
   const {
     data: user,
@@ -103,6 +115,17 @@ function App() {
     [address]
   );
 
+  const localKeyPair = useLiveQuery(
+    () => {
+      if (!address) {
+        return undefined;
+      }
+
+      return db.keyPairs.get(normalizeAddress(address));
+    },
+    [address]
+  );
+
   const localMessages = useLiveQuery(
     () => {
       if (!userContractAddress) {
@@ -119,8 +142,17 @@ function App() {
   );
 
   const localRecords = useLiveQuery(
-    () => db.records.orderBy("recordIndex").toArray(),
-    [],
+    () => {
+      if (!MAIN_CONNECTOR_ADDRESS) {
+        return Promise.resolve([] as LocalRecord[]);
+      }
+
+      return db.records
+        .where("mainConnector")
+        .equals(normalizeAddress(MAIN_CONNECTOR_ADDRESS))
+        .sortBy("recordIndex");
+    },
+    [MAIN_CONNECTOR_ADDRESS],
     [] as LocalRecord[]
   );
 
@@ -139,10 +171,17 @@ function App() {
 
   const currentRecordsCursor = useLiveQuery(
     async () => {
-      const state = await db.syncState.get(MAIN_CONNECTOR_RECORDS_CURSOR_KEY);
+      if (!MAIN_CONNECTOR_ADDRESS) {
+        return 0;
+      }
+
+      const state = await db.syncState.get(
+        mainConnectorRecordsCursorKey(MAIN_CONNECTOR_ADDRESS)
+      );
+
       return state?.value ?? 0;
     },
-    [],
+    [MAIN_CONNECTOR_ADDRESS],
     0
   );
 
@@ -240,9 +279,36 @@ function App() {
     });
   }, [connectors]);
 
+  async function generateKeys() {
+    if (!address) {
+      setCryptoStatus("Wallet is not connected");
+      return;
+    }
+
+    setCryptoStatus("Generating RSA keys...");
+
+    const keyPair = await generateRsaKeyPair();
+    const walletAddress = normalizeAddress(address);
+
+    await db.keyPairs.put({
+      walletAddress,
+      publicKey: keyPair.publicKey,
+      privateKey: keyPair.privateKey,
+      createdAt: Date.now(),
+    });
+
+    setPubkey(keyPair.publicKey);
+    setCryptoStatus("RSA keys generated. Public key is ready for registration.");
+  }
+
   function register() {
     if (!MAIN_CONNECTOR_ADDRESS) {
       alert("VITE_MAIN_CONNECTOR_ADDRESS is not set");
+      return;
+    }
+
+    if (!pubkey.trim()) {
+      alert("Generate RSA keys first");
       return;
     }
 
@@ -276,6 +342,11 @@ function App() {
       return;
     }
 
+    if (!encryptedRecord.trim()) {
+      alert("Encrypted record is empty");
+      return;
+    }
+
     writeMainConnector({
       address: MAIN_CONNECTOR_ADDRESS,
       abi: mainConnectorAbi,
@@ -283,6 +354,84 @@ function App() {
       args: [encryptedRecord],
       chainId: 31337,
     });
+  }
+
+  async function encryptInvitationForRecipient() {
+    if (!publicClient) {
+      setCryptoStatus("Public client is not ready");
+      return;
+    }
+
+    if (!MAIN_CONNECTOR_ADDRESS) {
+      setCryptoStatus("MainConnector address is missing");
+      return;
+    }
+
+    if (!recipientLogin.trim()) {
+      setCryptoStatus("Recipient login is empty");
+      return;
+    }
+
+    setCryptoStatus(`Loading recipient ${recipientLogin}...`);
+
+    const recipient = (await publicClient.readContract({
+      address: MAIN_CONNECTOR_ADDRESS,
+      abi: mainConnectorAbi,
+      functionName: "getUserByLogin",
+      args: [recipientLogin],
+    })) as UserStruct;
+
+    if (isEmptyAddress(recipient.userAddress)) {
+      setCryptoStatus("Recipient not found");
+      return;
+    }
+
+    try {
+      setCryptoStatus("Encrypting invitation...");
+      const encrypted = await rsaEncrypt(recipient.pubkey, invitationPlaintext);
+      setEncryptedRecord(encrypted);
+      setCryptoStatus("Invitation encrypted. Now click Add record.");
+    } catch (error) {
+      console.error(error);
+      setCryptoStatus(
+        "Encryption failed. Recipient public key is probably not a valid generated RSA key."
+      );
+    }
+  }
+
+  async function tryDecryptLocalRecords() {
+    if (!address) {
+      setCryptoStatus("Wallet is not connected");
+      return;
+    }
+
+    const keyPair = await db.keyPairs.get(normalizeAddress(address));
+
+    if (!keyPair) {
+      setCryptoStatus("No local private key. Generate RSA keys first.");
+      return;
+    }
+
+    const records = localRecords ?? [];
+    const decrypted: DecryptedInvitation[] = [];
+
+    setCryptoStatus("Trying to decrypt local records...");
+
+    for (const record of records) {
+      try {
+        const content = await rsaDecrypt(keyPair.privateKey, record.encryptedRecord);
+
+        decrypted.push({
+          recordIndex: record.recordIndex,
+          content,
+        });
+      } catch {
+        // This record was not encrypted for this private key.
+      }
+    }
+
+    setDecryptedInvitations(decrypted);
+    setCryptoStatus(`Decryption finished. Found ${decrypted.length} invitation(s).`);
   }
 
   async function syncMessages() {
@@ -355,8 +504,10 @@ function App() {
 
     setRecordSyncStatus("Syncing records...");
 
-    const currentCursor =
-      (await db.syncState.get(MAIN_CONNECTOR_RECORDS_CURSOR_KEY))?.value ?? 0;
+    const normalizedMainConnector = normalizeAddress(MAIN_CONNECTOR_ADDRESS);
+    const cursorKey = mainConnectorRecordsCursorKey(MAIN_CONNECTOR_ADDRESS);
+
+    const currentCursor = (await db.syncState.get(cursorKey))?.value ?? 0;
 
     const chainRecords = (await publicClient.readContract({
       address: MAIN_CONNECTOR_ADDRESS,
@@ -374,7 +525,8 @@ function App() {
       const recordIndex = currentCursor + offset;
 
       return {
-        id: `record:${recordIndex}`,
+        id: `${normalizedMainConnector}:${recordIndex}`,
+        mainConnector: normalizedMainConnector,
         recordIndex,
         encryptedRecord: record,
       };
@@ -383,7 +535,7 @@ function App() {
     await db.transaction("rw", db.records, db.syncState, async () => {
       await db.records.bulkPut(rows);
       await db.syncState.put({
-        key: MAIN_CONNECTOR_RECORDS_CURSOR_KEY,
+        key: cursorKey,
         value: currentCursor + chainRecords.length,
       });
     });
@@ -468,6 +620,20 @@ function App() {
           <code>{MAIN_CONNECTOR_ADDRESS}</code>
         </div>
 
+        <section className="profile">
+          <h2>Local RSA keys</h2>
+
+          <button onClick={generateKeys}>Generate RSA keys</button>
+
+          {localKeyPair ? (
+            <p className="success">Local RSA key pair exists for this wallet.</p>
+          ) : (
+            <p className="muted">No local RSA keys yet.</p>
+          )}
+
+          {cryptoStatus && <p className="muted">{cryptoStatus}</p>}
+        </section>
+
         <button onClick={refreshUser} disabled={isUserLoading}>
           Refresh user
         </button>
@@ -503,6 +669,7 @@ function App() {
                 value={pubkey}
                 onChange={(event) => setPubkey(event.target.value)}
                 rows={4}
+                placeholder="Click Generate RSA keys first"
               />
             </label>
 
@@ -646,9 +813,7 @@ function App() {
               <div className="topbar">
                 <div>
                   <h2>Local messages from IndexedDB</h2>
-                  <p className="muted">
-                    Cursor: {currentMessageCursor ?? 0}
-                  </p>
+                  <p className="muted">Cursor: {currentMessageCursor ?? 0}</p>
                 </div>
 
                 <button onClick={syncMessages}>Sync messages</button>
@@ -687,14 +852,37 @@ function App() {
             </section>
 
             <section className="form">
-              <h2>Add demo record to MainConnector</h2>
+              <h2>Encrypt invitation record</h2>
+
+              <label>
+                Recipient login
+                <input
+                  value={recipientLogin}
+                  onChange={(event) => setRecipientLogin(event.target.value)}
+                  placeholder="alice"
+                />
+              </label>
+
+              <label>
+                Invitation plaintext
+                <textarea
+                  value={invitationPlaintext}
+                  onChange={(event) => setInvitationPlaintext(event.target.value)}
+                  rows={4}
+                />
+              </label>
+
+              <button onClick={encryptInvitationForRecipient}>
+                Encrypt invitation for recipient
+              </button>
 
               <label>
                 Encrypted invitation record
                 <textarea
                   value={encryptedRecord}
                   onChange={(event) => setEncryptedRecord(event.target.value)}
-                  rows={3}
+                  rows={5}
+                  placeholder="Encrypted record will appear here"
                 />
               </label>
 
@@ -704,7 +892,7 @@ function App() {
               >
                 {isAddRecordPending || isAddRecordConfirming
                   ? "Adding record..."
-                  : "Add record"}
+                  : "Add record to MainConnector"}
               </button>
 
               {addRecordHash && (
@@ -728,9 +916,7 @@ function App() {
               <div className="topbar">
                 <div>
                   <h2>Local MainConnector records from IndexedDB</h2>
-                  <p className="muted">
-                    Cursor: {currentRecordsCursor ?? 0}
-                  </p>
+                  <p className="muted">Cursor: {currentRecordsCursor ?? 0}</p>
                 </div>
 
                 <button onClick={syncRecords}>Sync MainConnector records</button>
@@ -752,6 +938,40 @@ function App() {
                     <div>
                       <span>Encrypted record</span>
                       <code>{record.encryptedRecord}</code>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="profile">
+              <div className="topbar">
+                <div>
+                  <h2>Try decrypt local records</h2>
+                  <p className="muted">
+                    This tries every local MainConnector record with your local private key.
+                  </p>
+                </div>
+
+                <button onClick={tryDecryptLocalRecords}>
+                  Try decrypt records
+                </button>
+              </div>
+
+              {decryptedInvitations.length === 0 && (
+                <p className="muted">No decrypted invitations yet.</p>
+              )}
+
+              <div className="messages">
+                {decryptedInvitations.map((invitation) => (
+                  <article className="message" key={invitation.recordIndex}>
+                    <div>
+                      <strong>Record #{invitation.recordIndex}</strong>
+                    </div>
+
+                    <div>
+                      <span>Decrypted content</span>
+                      <code>{invitation.content}</code>
                     </div>
                   </article>
                 ))}

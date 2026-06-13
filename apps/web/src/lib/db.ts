@@ -21,8 +21,16 @@ export type LocalMessage = {
 
 export type LocalRecord = {
   id: string;
+  mainConnector: string;
   recordIndex: number;
   encryptedRecord: string;
+};
+
+export type LocalKeyPair = {
+  walletAddress: string;
+  publicKey: string;
+  privateKey: string;
+  createdAt: number;
 };
 
 export type SyncState = {
@@ -34,6 +42,7 @@ class MessengerDatabase extends Dexie {
   profiles!: Table<LocalProfile, string>;
   messages!: Table<LocalMessage, string>;
   records!: Table<LocalRecord, string>;
+  keyPairs!: Table<LocalKeyPair, string>;
   syncState!: Table<SyncState, string>;
 
   constructor() {
@@ -51,12 +60,18 @@ class MessengerDatabase extends Dexie {
       records: "&id, recordIndex",
       syncState: "&key",
     });
+
+    this.version(3).stores({
+      profiles: "&walletAddress, userContract, login",
+      messages: "&id, userContract, [userContract+messageIndex], timestamp",
+      records: "&id, mainConnector, [mainConnector+recordIndex], recordIndex",
+      keyPairs: "&walletAddress",
+      syncState: "&key",
+    });
   }
 }
 
 export const db = new MessengerDatabase();
-
-export const MAIN_CONNECTOR_RECORDS_CURSOR_KEY = "mainConnector:records";
 
 export function normalizeAddress(address: string) {
   return address.toLowerCase();
@@ -64,4 +79,8 @@ export function normalizeAddress(address: string) {
 
 export function messageCursorKey(userContract: string) {
   return `messages:${normalizeAddress(userContract)}`;
+}
+
+export function mainConnectorRecordsCursorKey(mainConnector: string) {
+  return `records:${normalizeAddress(mainConnector)}`;
 }
