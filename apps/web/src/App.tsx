@@ -1,11 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createWalletClient, custom, type Address } from "viem";
-import {
-  useAccount,
-  useConnect,
-  useDisconnect,
-  usePublicClient,
-} from "wagmi";
+import { useEffect, useRef, useState } from "react";
 
 import "./style.css";
 
@@ -21,94 +14,28 @@ import { DetailsPanel } from "./components/DetailsPanel";
 
 import { normalizeAddress } from "./lib/db";
 import { MAIN_CONNECTOR_ADDRESS } from "./lib/contracts";
-import { appChain } from "./lib/wagmi";
 import { startBlockchainSyncer } from "./lib/syncer";
+import { useAppWallet } from "./hooks/useAppWallet";
 import { useMessengerData } from "./hooks/useMessengerData";
 import { useMessengerActions } from "./hooks/useMessengerActions";
 
-type EthereumProvider = {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-};
-
-function getEthereumProvider() {
-  const ethereum = (window as unknown as {
-    ethereum?: EthereumProvider;
-  }).ethereum;
-
-  if (!ethereum) {
-    throw new Error("Injected wallet provider is missing");
-  }
-
-  return ethereum;
-}
-
-async function switchInjectedWalletToAppChain() {
-  const ethereum = getEthereumProvider();
-  const chainIdHex = `0x${appChain.id.toString(16)}`;
-
-  try {
-    await ethereum.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: chainIdHex }],
-    });
-  } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code?: number | string }).code
-        : undefined;
-
-    if (code !== 4902 && code !== "4902") {
-      throw error;
-    }
-
-    await ethereum.request({
-      method: "wallet_addEthereumChain",
-      params: [
-        {
-          chainId: chainIdHex,
-          chainName: appChain.name,
-          nativeCurrency: appChain.nativeCurrency,
-          rpcUrls: [...appChain.rpcUrls.default.http],
-          blockExplorerUrls: appChain.blockExplorers?.default?.url
-            ? [appChain.blockExplorers.default.url]
-            : undefined,
-        },
-      ],
-    });
-  }
-}
-
-function toAddress(address: string) {
-  return normalizeAddress(address) as Address;
-}
-
 export default function App() {
-  const { address, isConnected, chainId } = useAccount();
-  const { connectors, connect, isPending: isConnecting } = useConnect();
-  const { disconnect } = useDisconnect();
+  const {
+    appChain,
+    ownerAddress,
+    isConnected,
+    chainId,
+    wrongNetwork,
+    connectors,
+    connect,
+    isConnecting,
+    disconnect,
+    publicClient,
+    walletClient,
+    switchToAppChain,
+  } = useAppWallet();
 
-  const publicClient = usePublicClient({ chainId: appChain.id });
   const messageScrollerRef = useRef<HTMLDivElement | null>(null);
-
-  const ownerAddress = useMemo(() => {
-    return address ? toAddress(address) : undefined;
-  }, [address]);
-
-  const walletClient = useMemo(() => {
-    if (!ownerAddress) {
-      return undefined;
-    }
-
-    try {
-      return createWalletClient({
-        account: ownerAddress,
-        chain: appChain,
-        transport: custom(getEthereumProvider()),
-      });
-    } catch {
-      return undefined;
-    }
-  }, [ownerAddress]);
 
   const [showDebug, setShowDebug] = useState(false);
 
@@ -168,8 +95,6 @@ export default function App() {
     onMessageTextChange: setMessageText,
     onInviteTargetChange: setInviteTarget,
   });
-
-  const wrongNetwork = isConnected && chainId !== appChain.id;
 
   useEffect(() => {
     if (!selectedChatId && chats.length > 0) {
@@ -256,7 +181,7 @@ export default function App() {
         appChainName={appChain.name}
         appChainId={appChain.id}
         onSwitchNetwork={async () => {
-          await switchInjectedWalletToAppChain();
+          await switchToAppChain();
           window.location.reload();
         }}
         onDisconnect={() => disconnect()}
