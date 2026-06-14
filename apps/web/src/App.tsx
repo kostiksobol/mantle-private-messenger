@@ -10,6 +10,16 @@ import {
 
 import "./style.css";
 
+import {
+  ConnectScreen,
+  OnboardingScreen,
+  WrongNetworkScreen,
+} from "./components/AuthScreens";
+import { ChatSidebar } from "./components/ChatSidebar";
+import { ConversationPanel } from "./components/ConversationPanel";
+import { DebugPanel } from "./components/DebugPanel";
+import { DetailsPanel } from "./components/DetailsPanel";
+
 import { aesEncrypt } from "./lib/crypto/aes";
 import {
   deriveChatId,
@@ -117,41 +127,6 @@ function toAddress(address: string) {
 
 function isZeroAddress(address: string) {
   return normalizeAddress(address) === ZERO_ADDRESS;
-}
-
-function shortAddress(address?: string) {
-  if (!address) {
-    return "—";
-  }
-
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-function initials(value?: string) {
-  if (!value) {
-    return "?";
-  }
-
-  return value.trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function formatTime(timestamp: number) {
-  if (!timestamp) {
-    return "";
-  }
-
-  return new Date(timestamp * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDateTime(timestamp: number) {
-  if (!timestamp) {
-    return "—";
-  }
-
-  return new Date(timestamp * 1000).toLocaleString();
 }
 
 export default function App() {
@@ -720,454 +695,107 @@ export default function App() {
 
   if (!isConnected) {
     return (
-      <main className="authPage">
-        <section className="authCard">
-          <div className="brandMark">M</div>
-
-          <h1>Private Messenger</h1>
-
-          <p>
-            Wallet-native encrypted messaging over EVM contracts.
-          </p>
-
-          <button
-            className="primaryButton full"
-            onClick={() => connect({ connector: connectors[0] })}
-            disabled={!connectors[0] || isConnecting}
-          >
-            Connect wallet
-          </button>
-
-          <div className="authHint">
-            Configured network: {appChain.name} · {appChain.id}
-          </div>
-        </section>
-      </main>
+      <ConnectScreen
+        appChainName={appChain.name}
+        appChainId={appChain.id}
+        disabled={!connectors[0] || isConnecting}
+        onConnect={() => {
+          if (connectors[0]) {
+            connect({ connector: connectors[0] });
+          }
+        }}
+      />
     );
   }
 
   if (wrongNetwork) {
     return (
-      <main className="authPage">
-        <section className="authCard">
-          <div className="brandMark warning">!</div>
-
-          <h1>Wrong network</h1>
-
-          <p>
-            Your wallet is on chain {chainId}. This app is configured for{" "}
-            {appChain.name} / {appChain.id}.
-          </p>
-
-          <button
-            className="primaryButton full"
-            onClick={async () => {
-              await switchInjectedWalletToAppChain();
-              window.location.reload();
-            }}
-          >
-            Switch network
-          </button>
-
-          <button className="ghostButton full" onClick={() => disconnect()}>
-            Disconnect
-          </button>
-        </section>
-      </main>
+      <WrongNetworkScreen
+        currentChainId={chainId}
+        appChainName={appChain.name}
+        appChainId={appChain.id}
+        onSwitchNetwork={async () => {
+          await switchInjectedWalletToAppChain();
+          window.location.reload();
+        }}
+        onDisconnect={() => disconnect()}
+      />
     );
   }
 
   if (!selfProfile) {
     return (
-      <main className="authPage">
-        <section className="authCard onboardingCard">
-          <div className="brandMark">M</div>
-
-          <h1>Create profile</h1>
-
-          <p>
-            Register an on-chain profile. Your RSA key stays in localStorage.
-          </p>
-
-          <div className="statusPills">
-            <span>{shortAddress(ownerAddress)}</span>
-            <span>{appChain.name}</span>
-            <span className={rsaKeys ? "greenPill" : "yellowPill"}>
-              RSA {rsaKeys ? "ready" : "missing"}
-            </span>
-          </div>
-
-          <input
-            placeholder="Login"
-            value={login}
-            onChange={(event) => setLogin(event.target.value)}
-          />
-
-          <input
-            placeholder="Display name"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-
-          <div className="splitButtons">
-            <button disabled={busy} onClick={handleEnsureKeys}>
-              Ensure RSA
-            </button>
-
-            <button
-              className="primaryButton"
-              disabled={busy || !login.trim()}
-              onClick={handleRegister}
-            >
-              Register
-            </button>
-          </div>
-
-          <button className="ghostButton full" onClick={() => disconnect()}>
-            Disconnect
-          </button>
-
-          <div className="miniActivity">
-            {activity.slice(0, 6).map((item, index) => (
-              <div key={`${item}-${index}`}>{item}</div>
-            ))}
-          </div>
-        </section>
-      </main>
+      <OnboardingScreen
+        ownerAddress={ownerAddress}
+        appChainName={appChain.name}
+        rsaReady={Boolean(rsaKeys)}
+        login={login}
+        displayName={displayName}
+        busy={busy}
+        activity={activity}
+        onLoginChange={setLogin}
+        onDisplayNameChange={setDisplayName}
+        onEnsureKeys={handleEnsureKeys}
+        onRegister={handleRegister}
+        onDisconnect={() => disconnect()}
+      />
     );
   }
 
   return (
     <main className="messengerShell">
-      <aside className="chatSidebar">
-        <header className="sidebarHeader">
-          <div>
-            <div className="sidebarTitle">Chats</div>
-            <div className="sidebarSubtitle">
-              {selfProfile.login} · {shortAddress(ownerAddress)}
-            </div>
-          </div>
+      <ChatSidebar
+        selfProfile={selfProfile}
+        ownerAddress={ownerAddress}
+        chatName={chatName}
+        selectedChatId={selectedChatId}
+        chatsWithPreview={chatsWithPreview}
+        busy={busy}
+        showDebug={showDebug}
+        onChatNameChange={setChatName}
+        onCreateChat={handleCreateChat}
+        onSelectChat={setSelectedChatId}
+        onToggleDebug={() => setShowDebug((value) => !value)}
+        onDisconnect={() => disconnect()}
+      />
 
-          <button
-            className="roundButton"
-            title="Disconnect"
-            onClick={() => disconnect()}
-          >
-            ⎋
-          </button>
-        </header>
+      <ConversationPanel
+        selectedChat={selectedChat}
+        selectedMembers={selectedMembers}
+        selectedMessages={selectedMessages}
+        knownUsersByAddress={knownUsersByAddress}
+        ownerAddress={ownerAddress}
+        appChainName={appChain.name}
+        messageText={messageText}
+        busy={busy}
+        messageScrollerRef={messageScrollerRef}
+        onMessageTextChange={setMessageText}
+        onSendMessage={handleSendMessage}
+      />
 
-        <section className="newChatBox">
-          <input
-            placeholder="New chat name"
-            value={chatName}
-            onChange={(event) => setChatName(event.target.value)}
-          />
-
-          <button disabled={busy} onClick={handleCreateChat}>
-            Create
-          </button>
-        </section>
-
-        <nav className="chatList">
-          {chatsWithPreview.length === 0 ? (
-            <div className="emptyState small">
-              <strong>No chats yet</strong>
-              <span>Create your first encrypted chat.</span>
-            </div>
-          ) : (
-            chatsWithPreview.map(({ chat, lastMessage, membersCount }) => (
-              <button
-                key={chat.chatId}
-                className={
-                  chat.chatId === selectedChatId
-                    ? "chatItem active"
-                    : "chatItem"
-                }
-                onClick={() => setSelectedChatId(chat.chatId)}
-              >
-                <div className="avatar">
-                  {initials(chat.name)}
-                </div>
-
-                <div className="chatItemBody">
-                  <div className="chatItemTop">
-                    <span>{chat.name}</span>
-                    <time>{lastMessage ? formatTime(lastMessage.timestamp) : ""}</time>
-                  </div>
-
-                  <div className="chatPreview">
-                    {lastMessage
-                      ? lastMessage.content
-                      : `${membersCount} member${membersCount === 1 ? "" : "s"}`}
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
-        </nav>
-
-        <footer className="sidebarFooter">
-          <button
-            className="ghostButton full"
-            onClick={() => setShowDebug((value) => !value)}
-          >
-            {showDebug ? "Hide debug" : "Show debug"}
-          </button>
-        </footer>
-      </aside>
-
-      <section className="conversationPanel">
-        {selectedChat ? (
-          <>
-            <header className="conversationHeader">
-              <div>
-                <h1>{selectedChat.name}</h1>
-                <p>
-                  {selectedMembers.length} members · {selectedMessages.length} messages
-                </p>
-              </div>
-
-              <div className="networkBadge">
-                {appChain.name}
-              </div>
-            </header>
-
-            <div ref={messageScrollerRef} className="messageScroller">
-              {selectedMessages.length === 0 ? (
-                <div className="emptyConversation">
-                  <span>No visible messages yet.</span>
-                </div>
-              ) : (
-                selectedMessages.map((message) => {
-                  const isMine =
-                    normalizeAddress(message.authorAddress) === ownerAddress;
-
-                  const author = knownUsersByAddress.get(
-                    normalizeAddress(message.authorAddress)
-                  );
-
-                  const authorName =
-                    author?.name ||
-                    author?.login ||
-                    shortAddress(message.authorAddress);
-
-                  return (
-                    <article
-                      key={message.id}
-                      className={isMine ? "messageBubble mine" : "messageBubble"}
-                    >
-                      {!isMine && (
-                        <div className="messageAuthor">
-                          {authorName}
-                        </div>
-                      )}
-
-                      <div className="messageText">
-                        {message.content}
-                      </div>
-
-                      <div className="messageMeta">
-                        <span>{formatTime(message.timestamp)}</span>
-                        <span>#{message.sourceMessageIndex}</span>
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-
-            <form
-              className="composer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleSendMessage();
-              }}
-            >
-              <textarea
-                placeholder="Write a message..."
-                value={messageText}
-                onChange={(event) => setMessageText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleSendMessage();
-                  }
-                }}
-              />
-
-              <button disabled={busy || !messageText.trim()}>
-                Send
-              </button>
-            </form>
-          </>
-        ) : (
-          <div className="noChatSelected">
-            <div className="brandMark">M</div>
-            <h1>Select a chat</h1>
-            <p>Choose a chat from the left sidebar or create a new one.</p>
-          </div>
-        )}
-      </section>
-
-      <aside className="detailsPanel">
-        <header className="detailsHeader">
-          <h2>Chat info</h2>
-          <p>{selectedChat?.name || "No chat selected"}</p>
-        </header>
-
-        {selectedChat ? (
-          <>
-            <section className="inviteBox">
-              <label>Invite user</label>
-
-              <div className="inviteRow">
-                <input
-                  placeholder="login or 0x address"
-                  value={inviteTarget}
-                  onChange={(event) => setInviteTarget(event.target.value)}
-                />
-
-                <button
-                  disabled={busy || !inviteTarget.trim()}
-                  onClick={handleInvite}
-                >
-                  Invite
-                </button>
-              </div>
-            </section>
-
-            <section className="membersBox">
-              <h3>Members</h3>
-
-              <div className="memberList">
-                {selectedMembers.map((member) => {
-                  const user = knownUsersByAddress.get(
-                    normalizeAddress(member.userAddress)
-                  );
-
-                  const name =
-                    user?.name ||
-                    user?.login ||
-                    shortAddress(member.userAddress);
-
-                  const active =
-                    normalizeAddress(member.userAddress) ===
-                    normalizeAddress(selectedMemberAddress || "");
-
-                  return (
-                    <button
-                      key={`${member.chatId}:${member.userAddress}`}
-                      className={active ? "memberItem active" : "memberItem"}
-                      onClick={() => setSelectedMemberAddress(member.userAddress)}
-                    >
-                      <div className="avatar memberAvatar">
-                        {initials(name)}
-                      </div>
-
-                      <div>
-                        <div className="memberName">{name}</div>
-                        <div className="memberMeta">
-                          {shortAddress(member.userAddress)} · cursor {member.cursor}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="memberDetails">
-              <h3>Participant details</h3>
-
-              {selectedMember ? (
-                <dl>
-                  <dt>Login</dt>
-                  <dd>{selectedMember.login}</dd>
-
-                  <dt>Name</dt>
-                  <dd>{selectedMember.name}</dd>
-
-                  <dt>Address</dt>
-                  <dd>{selectedMember.userAddress}</dd>
-
-                  <dt>Contract</dt>
-                  <dd>{selectedMember.userContract}</dd>
-
-                  <dt>Kind</dt>
-                  <dd>{selectedMember.kind === 0 ? "Human" : "Agent"}</dd>
-
-                  <dt>Metadata</dt>
-                  <dd>{selectedMember.metadataURI || "—"}</dd>
-                </dl>
-              ) : selectedMemberAddress ? (
-                <dl>
-                  <dt>Address</dt>
-                  <dd>{selectedMemberAddress}</dd>
-                </dl>
-              ) : (
-                <p className="muted">
-                  Select a participant to inspect profile data.
-                </p>
-              )}
-            </section>
-          </>
-        ) : (
-          <div className="emptyState">
-            Select a chat to see participants.
-          </div>
-        )}
-      </aside>
+      <DetailsPanel
+        selectedChat={selectedChat}
+        inviteTarget={inviteTarget}
+        busy={busy}
+        selectedMembers={selectedMembers}
+        knownUsersByAddress={knownUsersByAddress}
+        selectedMemberAddress={selectedMemberAddress}
+        selectedMember={selectedMember}
+        onInviteTargetChange={setInviteTarget}
+        onInvite={handleInvite}
+        onSelectMemberAddress={setSelectedMemberAddress}
+      />
 
       {showDebug && (
-        <section className="debugPanel">
-          <header>
-            <div>
-              <h2>Debug</h2>
-              <p>IndexedDB, sync activity and cursors.</p>
-            </div>
-
-            <button className="dangerButton" onClick={handleDeleteIndexedDb}>
-              Delete IndexedDB
-            </button>
-          </header>
-
-          <div className="debugGrid">
-            <div>
-              <h3>Profile</h3>
-              <pre>{JSON.stringify(selfProfile, null, 2)}</pre>
-            </div>
-
-            <div>
-              <h3>Activity</h3>
-              <pre>{activity.join("\n")}</pre>
-            </div>
-
-            <div>
-              <h3>Chats</h3>
-              <pre>{JSON.stringify(chats, null, 2)}</pre>
-            </div>
-
-            <div>
-              <h3>Members</h3>
-              <pre>{JSON.stringify(chatMembers, null, 2)}</pre>
-            </div>
-
-            <div>
-              <h3>Messages</h3>
-              <pre>
-                {JSON.stringify(
-                  messages.map((message) => ({
-                    ...message,
-                    time: formatDateTime(message.timestamp),
-                  })),
-                  null,
-                  2
-                )}
-              </pre>
-            </div>
-          </div>
-        </section>
+        <DebugPanel
+          selfProfile={selfProfile}
+          activity={activity}
+          chats={chats}
+          chatMembers={chatMembers}
+          knownUsers={knownUsers}
+          messages={messages}
+          onDeleteIndexedDb={handleDeleteIndexedDb}
+        />
       )}
     </main>
   );
