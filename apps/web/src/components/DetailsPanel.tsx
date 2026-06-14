@@ -39,6 +39,11 @@ export function DetailsPanel({
           <section className="creatorBox">
             <label>Creator</label>
             <div>{shortAddress(selectedChat.creatorAddress)}</div>
+            <small>
+              {selectedChat.creatorVerified
+                ? "Verified by ChatCreation"
+                : "Waiting for ChatCreation"}
+            </small>
           </section>
 
           <section className="inviteBox">

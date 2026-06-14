@@ -474,24 +474,30 @@ class BlockchainSyncer {
     }
 
     if (payload.event === "ChatCreation") {
-      await this.upsertChat({
-        ownerAddress: this.ownerAddress,
-        chatId: chat.chatId,
-        name: payload.name,
-        chatKey: chat.chatKey,
-        creatorAddress: chat.creatorAddress,
-      });
+      const isCreator =
+        asAddress(input.member.userAddress) === asAddress(chat.creatorAddress);
 
-      await this.putMessageIfNew({
-        ownerAddress: this.ownerAddress,
-        chatId: chat.chatId,
-        authorAddress: input.member.userAddress,
-        authorUserContract: input.member.userContract,
-        sourceMessageIndex: input.sourceMessageIndex,
-        content: `Chat created: ${payload.name}`,
-        timestamp: Number(input.message.timestamp),
-        event: "ChatCreation",
-      });
+      if (isCreator) {
+        await this.upsertChat({
+          ownerAddress: this.ownerAddress,
+          chatId: chat.chatId,
+          name: payload.name,
+          chatKey: chat.chatKey,
+          creatorAddress: chat.creatorAddress,
+          creatorVerified: true,
+        });
+
+        await this.putMessageIfNew({
+          ownerAddress: this.ownerAddress,
+          chatId: chat.chatId,
+          authorAddress: input.member.userAddress,
+          authorUserContract: input.member.userContract,
+          sourceMessageIndex: input.sourceMessageIndex,
+          content: `Chat created: ${payload.name}`,
+          timestamp: Number(input.message.timestamp),
+          event: "ChatCreation",
+        });
+      }
     }
 
     if (payload.event === "Invitation") {
@@ -610,6 +616,7 @@ class BlockchainSyncer {
           : chat.name,
       chatKey: chat.chatKey,
       creatorAddress: asAddress(chat.creatorAddress),
+      creatorVerified: existing?.creatorVerified || chat.creatorVerified || false,
     });
   }
 

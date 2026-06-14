@@ -29,6 +29,7 @@ export type LocalChat = {
   name: string;
   chatKey: string;
   creatorAddress: string;
+  creatorVerified?: boolean;
 };
 
 export type ChatMember = {

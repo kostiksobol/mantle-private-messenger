@@ -1,7 +1,11 @@
 import Dexie, { type Table } from "dexie";
 
 const appNetwork = import.meta.env.VITE_APP_NETWORK || "anvil";
-const databaseName = `mantle-private-messenger:${appNetwork}`;
+const mainConnectorForDb = (
+  import.meta.env.VITE_MAIN_CONNECTOR_ADDRESS || "no-main-connector"
+).toLowerCase();
+
+const databaseName = `mantle-private-messenger:${appNetwork}:${mainConnectorForDb}`;
 
 export type SelfProfile = {
   id?: number;
@@ -39,6 +43,7 @@ export type LocalChat = {
   name: string;
   chatKey: string;
   creatorAddress: string;
+  creatorVerified?: boolean;
 };
 
 export type ChatMember = {

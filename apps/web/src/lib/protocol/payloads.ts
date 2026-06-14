@@ -1,3 +1,21 @@
+/**
+ * Creator-rooted chat protocol.
+ *
+ * MainConnector record is RSA-encrypted for one recipient:
+ *   { chatKey, creator }
+ *
+ * UserContract owner is always the author of decrypted chat events.
+ *
+ * ChatCreation:
+ *   { event: "ChatCreation", name }
+ *
+ * Invitation:
+ *   { event: "Invitation", invited }
+ *
+ * Membership is discovered by starting from creator and then reading every
+ * known member's UserContract. Each Invitation adds its invited user.
+ */
+
 export type MainInvitationPayload = {
   chatKey: string;
   creator: string;
