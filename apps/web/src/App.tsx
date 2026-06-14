@@ -13,9 +13,8 @@ import { DebugPanel } from "./components/DebugPanel";
 import { DetailsPanel } from "./components/DetailsPanel";
 
 import { normalizeAddress } from "./lib/db";
-import { MAIN_CONNECTOR_ADDRESS } from "./lib/contracts";
-import { startBlockchainSyncer } from "./lib/syncer";
 import { useAppWallet } from "./hooks/useAppWallet";
+import { useBlockchainSyncer } from "./hooks/useBlockchainSyncer";
 import { useMessengerData } from "./hooks/useMessengerData";
 import { useMessengerActions } from "./hooks/useMessengerActions";
 
@@ -140,24 +139,12 @@ export default function App() {
     });
   }, [selectedChatId, selectedMessages.length]);
 
-  useEffect(() => {
-    if (!ownerAddress || !publicClient || !MAIN_CONNECTOR_ADDRESS) {
-      return;
-    }
-
-    addActivity("syncer start");
-
-    const stop = startBlockchainSyncer({
-      ownerAddress,
-      publicClient,
-      mainConnectorAddress: MAIN_CONNECTOR_ADDRESS,
-    });
-
-    return () => {
-      addActivity("syncer stop");
-      stop();
-    };
-  }, [addActivity, ownerAddress, publicClient, syncNonce]);
+  useBlockchainSyncer({
+    ownerAddress,
+    publicClient,
+    syncNonce,
+    addActivity,
+  });
 
   if (!isConnected) {
     return (
