@@ -8,6 +8,7 @@ import {
   normalizeAddress,
   type ChatMember,
   type LocalChat,
+  type LocalMessageEvent,
 } from "./db";
 import { loadRsaKeyPair } from "./localKeys";
 import {
@@ -37,6 +38,20 @@ type ChainMessage = {
   timestamp: bigint;
 };
 
+export type SyncerOptions = {
+  ownerAddress: Address;
+  publicClient: PublicClient;
+  mainConnectorAddress?: Address;
+};
+
+function asAddress(value: string) {
+  return normalizeAddress(value) as Address;
+}
+
+function isZeroAddress(address: string) {
+  return normalizeAddress(address) === ZERO_ADDRESS;
+}
+
 function chainUserFrom(value: unknown): ChainUser {
   const item = value as Partial<ChainUser> & Record<number, unknown>;
 
@@ -59,20 +74,6 @@ function chainMessageFrom(value: unknown): ChainMessage {
     tag: String(item.tag ?? item[1] ?? ""),
     timestamp: BigInt(String(item.timestamp ?? item[2] ?? 0)),
   };
-}
-
-export type SyncerOptions = {
-  ownerAddress: Address;
-  publicClient: PublicClient;
-  mainConnectorAddress?: Address;
-};
-
-function asAddress(value: string) {
-  return normalizeAddress(value) as Address;
-}
-
-function isZeroAddress(address: string) {
-  return normalizeAddress(address) === ZERO_ADDRESS;
 }
 
 export function startBlockchainSyncer(options: SyncerOptions) {
@@ -165,18 +166,8 @@ class BlockchainSyncer {
       return;
     }
 
-    for (let i = 0; i < 20; i++) {
-      const before = await this.countChatMembers();
-
-      await this.syncMainRecords();
-      await this.syncAllKnownUserContracts();
-
-      const after = await this.countChatMembers();
-
-      if (after === before) {
-        break;
-      }
-    }
+    await this.syncMainRecords();
+    await this.syncAllKnownUserContracts();
   }
 
   private watchMainConnector() {
@@ -190,7 +181,6 @@ class BlockchainSyncer {
         this.enqueue("main", async () => {
           await this.syncMainRecords();
           await this.syncAllKnownUserContracts();
-          await this.refreshUserContractWatcher();
         });
       },
       onError: (error) => {
@@ -231,7 +221,7 @@ class BlockchainSyncer {
         for (const log of logs) {
           this.enqueue(`user:${normalizeAddress(log.address)}`, async () => {
             await this.syncUserContract(log.address);
-            await this.refreshUserContractWatcher();
+            await this.syncAllKnownUserContracts();
           });
         }
       },
@@ -331,13 +321,14 @@ class BlockchainSyncer {
     }
 
     const chatId = await deriveChatId(payload.chatKey);
+    const creatorAddress = asAddress(payload.creator);
 
     await this.upsertChat({
       ownerAddress: this.ownerAddress,
       chatId,
       name: "Unnamed chat",
       chatKey: payload.chatKey,
-      invitedByAddress: asAddress(payload.inviter),
+      creatorAddress,
     });
 
     const self = await db.selfProfiles
@@ -355,37 +346,38 @@ class BlockchainSyncer {
       });
     }
 
-    const inviter = await this.readUser(asAddress(payload.inviter));
-
-    if (inviter) {
-      await this.upsertKnownUser(inviter);
-
-      await this.ensureChatMember({
-        ownerAddress: this.ownerAddress,
-        chatId,
-        userAddress: asAddress(inviter.userAddress),
-        userContract: asAddress(inviter.userContract),
-        cursor: 0,
-      });
-    }
+    await this.addUserToChatByAddress({
+      chatId,
+      userAddress: creatorAddress,
+    });
   }
 
   private async syncAllKnownUserContracts() {
-    const members = await db.chatMembers
-      .where("ownerAddress")
-      .equals(this.ownerAddress)
-      .toArray();
+    while (!this.stopped) {
+      const before = await this.countChatMembers();
 
-    const userContracts = Array.from(
-      new Set(members.map((member) => asAddress(member.userContract)))
-    );
+      const members = await db.chatMembers
+        .where("ownerAddress")
+        .equals(this.ownerAddress)
+        .toArray();
 
-    for (const userContract of userContracts) {
-      if (this.stopped) {
-        return;
+      const userContracts = Array.from(
+        new Set(members.map((member) => asAddress(member.userContract)))
+      ).sort();
+
+      for (const userContract of userContracts) {
+        if (this.stopped) {
+          return;
+        }
+
+        await this.syncUserContract(userContract);
       }
 
-      await this.syncUserContract(userContract);
+      const after = await this.countChatMembers();
+
+      if (after === before) {
+        break;
+      }
     }
 
     await this.refreshUserContractWatcher();
@@ -487,6 +479,7 @@ class BlockchainSyncer {
         chatId: chat.chatId,
         name: payload.name,
         chatKey: chat.chatKey,
+        creatorAddress: chat.creatorAddress,
       });
 
       await this.putMessageIfNew({
@@ -502,12 +495,15 @@ class BlockchainSyncer {
     }
 
     if (payload.event === "Invitation") {
-      await this.addUserToChat(chat, payload.invited);
-      await this.addUserToChat(chat, payload.invitedBy);
+      await this.addUserToChatByAddress({
+        chatId: chat.chatId,
+        userAddress: input.member.userAddress,
+      });
 
-      if (asAddress(payload.invited) === this.ownerAddress) {
-        await this.setChatInvitedBy(chat, input.member.userAddress);
-      }
+      await this.addUserToChatByAddress({
+        chatId: chat.chatId,
+        userAddress: payload.invited,
+      });
 
       await this.putMessageIfNew({
         ownerAddress: this.ownerAddress,
@@ -519,7 +515,6 @@ class BlockchainSyncer {
         timestamp: Number(input.message.timestamp),
         event: "Invitation",
         invitedAddress: normalizeAddress(payload.invited),
-        invitedByAddress: normalizeAddress(payload.invitedBy),
       });
     }
 
@@ -539,8 +534,11 @@ class BlockchainSyncer {
     await this.setMemberCursor(input.member, input.sourceMessageIndex + 1);
   }
 
-  private async addUserToChat(chat: LocalChat, userAddress: string) {
-    const user = await this.readUser(asAddress(userAddress));
+  private async addUserToChatByAddress(input: {
+    chatId: string;
+    userAddress: string;
+  }) {
+    const user = await this.readUser(asAddress(input.userAddress));
 
     if (!user) {
       return;
@@ -550,7 +548,7 @@ class BlockchainSyncer {
 
     await this.ensureChatMember({
       ownerAddress: this.ownerAddress,
-      chatId: chat.chatId,
+      chatId: input.chatId,
       userAddress: asAddress(user.userAddress),
       userContract: asAddress(user.userContract),
       cursor: 0,
@@ -606,29 +604,12 @@ class BlockchainSyncer {
       id: existing?.id,
       ownerAddress: chat.ownerAddress,
       chatId: chat.chatId,
-      name: existing?.name && chat.name === "Unnamed chat"
-        ? existing.name
-        : chat.name,
+      name:
+        existing?.name && chat.name === "Unnamed chat"
+          ? existing.name
+          : chat.name,
       chatKey: chat.chatKey,
-      invitedByAddress: chat.invitedByAddress
-        ? asAddress(chat.invitedByAddress)
-        : existing?.invitedByAddress,
-    });
-  }
-
-  private async setChatInvitedBy(chat: LocalChat, invitedByAddress: string) {
-    const existing = await db.chats
-      .where("[ownerAddress+chatId]")
-      .equals([this.ownerAddress, chat.chatId])
-      .first();
-
-    if (!existing || existing.invitedByAddress) {
-      return;
-    }
-
-    await db.chats.put({
-      ...existing,
-      invitedByAddress: asAddress(invitedByAddress),
+      creatorAddress: asAddress(chat.creatorAddress),
     });
   }
 
@@ -666,9 +647,8 @@ class BlockchainSyncer {
     sourceMessageIndex: number;
     content: string;
     timestamp: number;
-    event?: "Message" | "ChatCreation" | "Invitation";
+    event?: LocalMessageEvent;
     invitedAddress?: string;
-    invitedByAddress?: string;
   }) {
     const existing = await db.messages
       .where("[ownerAddress+chatId+authorUserContract+sourceMessageIndex]")
@@ -695,9 +675,6 @@ class BlockchainSyncer {
       event: input.event,
       invitedAddress: input.invitedAddress
         ? asAddress(input.invitedAddress)
-        : undefined,
-      invitedByAddress: input.invitedByAddress
-        ? asAddress(input.invitedByAddress)
         : undefined,
     });
   }

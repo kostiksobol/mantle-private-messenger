@@ -28,7 +28,7 @@ export type LocalChat = {
   chatId: string;
   name: string;
   chatKey: string;
-  invitedByAddress?: string;
+  creatorAddress: string;
 };
 
 export type ChatMember = {
@@ -51,10 +51,8 @@ export type LocalMessage = {
   sourceMessageIndex: number;
   content: string;
   timestamp: number;
-
   event?: LocalMessageEvent;
   invitedAddress?: string;
-  invitedByAddress?: string;
 };
 
 export type ChatWithPreview = {

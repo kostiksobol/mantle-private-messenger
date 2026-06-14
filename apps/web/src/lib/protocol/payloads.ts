@@ -1,6 +1,6 @@
 export type MainInvitationPayload = {
   chatKey: string;
-  inviter: string;
+  creator: string;
 };
 
 export type ChatCreationPayload = {
@@ -11,7 +11,6 @@ export type ChatCreationPayload = {
 export type InvitationPayload = {
   event: "Invitation";
   invited: string;
-  invitedBy: string;
 };
 
 export type MessagePayload = {
@@ -24,17 +23,29 @@ export type ChatEventPayload =
   | InvitationPayload
   | MessagePayload;
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseJson(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 export function encodePayload(payload: object) {
   return JSON.stringify(payload);
 }
 
 export function createMainInvitationPayload(input: {
   chatKey: string;
-  inviter: string;
+  creator: string;
 }): MainInvitationPayload {
   return {
     chatKey: input.chatKey,
-    inviter: input.inviter,
+    creator: input.creator,
   };
 }
 
@@ -49,12 +60,10 @@ export function createChatCreationPayload(input: {
 
 export function createInvitationPayload(input: {
   invited: string;
-  invitedBy: string;
 }): InvitationPayload {
   return {
     event: "Invitation",
     invited: input.invited,
-    invitedBy: input.invitedBy,
   };
 }
 
@@ -67,63 +76,69 @@ export function createMessagePayload(input: {
   };
 }
 
-export function parseMainInvitationPayload(text: string) {
-  try {
-    const value = JSON.parse(text) as Partial<MainInvitationPayload>;
+export function parseMainInvitationPayload(
+  value: string
+): MainInvitationPayload | undefined {
+  const parsed = parseJson(value);
 
-    if (
-      typeof value.chatKey === "string" &&
-      typeof value.inviter === "string"
-    ) {
-      return {
-        chatKey: value.chatKey,
-        inviter: value.inviter,
-      };
-    }
-
-    return undefined;
-  } catch {
+  if (!isObject(parsed)) {
     return undefined;
   }
+
+  if (
+    typeof parsed.chatKey !== "string" ||
+    typeof parsed.creator !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    chatKey: parsed.chatKey,
+    creator: parsed.creator,
+  };
 }
 
-export function parseChatEventPayload(text: string): ChatEventPayload | undefined {
-  try {
-    const value = JSON.parse(text) as Partial<ChatEventPayload>;
+export function parseChatEventPayload(
+  value: string
+): ChatEventPayload | undefined {
+  const parsed = parseJson(value);
 
-    if (value.event === "ChatCreation") {
-      if (typeof value.name === "string") {
-        return {
-          event: "ChatCreation",
-          name: value.name,
-        };
-      }
-    }
-
-    if (value.event === "Invitation") {
-      if (
-        typeof value.invited === "string" &&
-        typeof value.invitedBy === "string"
-      ) {
-        return {
-          event: "Invitation",
-          invited: value.invited,
-          invitedBy: value.invitedBy,
-        };
-      }
-    }
-
-    if (value.event === "Message") {
-      if (typeof value.text === "string") {
-        return {
-          event: "Message",
-          text: value.text,
-        };
-      }
-    }
-
-    return undefined;
-  } catch {
+  if (!isObject(parsed) || typeof parsed.event !== "string") {
     return undefined;
   }
+
+  if (parsed.event === "ChatCreation") {
+    if (typeof parsed.name !== "string") {
+      return undefined;
+    }
+
+    return {
+      event: "ChatCreation",
+      name: parsed.name,
+    };
+  }
+
+  if (parsed.event === "Invitation") {
+    if (typeof parsed.invited !== "string") {
+      return undefined;
+    }
+
+    return {
+      event: "Invitation",
+      invited: parsed.invited,
+    };
+  }
+
+  if (parsed.event === "Message") {
+    if (typeof parsed.text !== "string") {
+      return undefined;
+    }
+
+    return {
+      event: "Message",
+      text: parsed.text,
+    };
+  }
+
+  return undefined;
 }

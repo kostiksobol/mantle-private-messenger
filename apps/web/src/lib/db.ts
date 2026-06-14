@@ -34,14 +34,11 @@ export type KnownUser = {
 
 export type LocalChat = {
   id?: number;
-
   ownerAddress: string;
-
-  // invariant: chatId = deriveChatId(chatKey)
   chatId: string;
-
   name: string;
   chatKey: string;
+  creatorAddress: string;
 };
 
 export type ChatMember = {
@@ -63,20 +60,15 @@ export type LocalMessageEvent = "Message" | "ChatCreation" | "Invitation";
 
 export type LocalMessage = {
   id?: number;
-
   ownerAddress: string;
-
   chatId: string;
-
   authorAddress: string;
   authorUserContract: string;
   sourceMessageIndex: number;
-
   content: string;
   timestamp: number;
   event?: LocalMessageEvent;
   invitedAddress?: string;
-  invitedByAddress?: string;
 };
 
 class MessengerDatabase extends Dexie {
