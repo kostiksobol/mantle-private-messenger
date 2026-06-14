@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { Address, Hash } from "viem";
+import { encodeFunctionData, type Address, type Hash } from "viem";
 
 import { aesEncrypt } from "../lib/crypto/aes";
 import {
@@ -17,6 +17,7 @@ import {
   userContractAbi,
 } from "../lib/contracts";
 import { appChain } from "../lib/wagmi";
+import { tryWalletSendCallsBatch } from "../lib/walletBatch";
 import {
   createChatCreationPayload,
   createInvitationPayload,
@@ -277,17 +278,6 @@ export function useMessengerActions({
 
       const creationTag = await generateMessageTag(chatKey);
 
-      const creationHash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: selfProfile.userContract as Address,
-        abi: userContractAbi,
-        functionName: "addMessage",
-        args: [creationBox, creationTag],
-      });
-
-      await wait(creationHash);
-
       const mainInvitation = await rsaEncrypt(
         keys.publicKey,
         encodePayload(
@@ -298,16 +288,52 @@ export function useMessengerActions({
         )
       );
 
-      const recordHash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: wallet.mainConnectorAddress,
-        abi: mainConnectorAbi,
-        functionName: "addRecord",
-        args: [mainInvitation],
+      const batched = await tryWalletSendCallsBatch({
+        from: wallet.ownerAddress,
+        chainId: appChain.id,
+        calls: [
+          {
+            to: selfProfile.userContract as Address,
+            data: encodeFunctionData({
+              abi: userContractAbi,
+              functionName: "addMessage",
+              args: [creationBox, creationTag],
+            }),
+          },
+          {
+            to: wallet.mainConnectorAddress,
+            data: encodeFunctionData({
+              abi: mainConnectorAbi,
+              functionName: "addRecord",
+              args: [mainInvitation],
+            }),
+          },
+        ],
       });
 
-      await wait(recordHash);
+      if (!batched) {
+        const creationHash = await wallet.walletClient.writeContract({
+          account: wallet.ownerAddress,
+          chain: appChain,
+          address: selfProfile.userContract as Address,
+          abi: userContractAbi,
+          functionName: "addMessage",
+          args: [creationBox, creationTag],
+        });
+
+        await wait(creationHash);
+
+        const recordHash = await wallet.walletClient.writeContract({
+          account: wallet.ownerAddress,
+          chain: appChain,
+          address: wallet.mainConnectorAddress,
+          abi: mainConnectorAbi,
+          functionName: "addRecord",
+          args: [mainInvitation],
+        });
+
+        await wait(recordHash);
+      }
 
       onChatNameChange("New chat");
       onSelectedChatIdChange(chatId);
@@ -412,17 +438,6 @@ export function useMessengerActions({
 
       const invitationTag = await generateMessageTag(selectedChat.chatKey);
 
-      const messageHash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: selfProfile.userContract as Address,
-        abi: userContractAbi,
-        functionName: "addMessage",
-        args: [invitationEvent, invitationTag],
-      });
-
-      await wait(messageHash);
-
       const mainInvitation = await rsaEncrypt(
         invitedUser.pubkey,
         encodePayload(
@@ -433,16 +448,52 @@ export function useMessengerActions({
         )
       );
 
-      const recordHash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: wallet.mainConnectorAddress,
-        abi: mainConnectorAbi,
-        functionName: "addRecord",
-        args: [mainInvitation],
+      const batched = await tryWalletSendCallsBatch({
+        from: wallet.ownerAddress,
+        chainId: appChain.id,
+        calls: [
+          {
+            to: wallet.mainConnectorAddress,
+            data: encodeFunctionData({
+              abi: mainConnectorAbi,
+              functionName: "addRecord",
+              args: [mainInvitation],
+            }),
+          },
+          {
+            to: selfProfile.userContract as Address,
+            data: encodeFunctionData({
+              abi: userContractAbi,
+              functionName: "addMessage",
+              args: [invitationEvent, invitationTag],
+            }),
+          },
+        ],
       });
 
-      await wait(recordHash);
+      if (!batched) {
+        const recordHash = await wallet.walletClient.writeContract({
+          account: wallet.ownerAddress,
+          chain: appChain,
+          address: wallet.mainConnectorAddress,
+          abi: mainConnectorAbi,
+          functionName: "addRecord",
+          args: [mainInvitation],
+        });
+
+        await wait(recordHash);
+
+        const messageHash = await wallet.walletClient.writeContract({
+          account: wallet.ownerAddress,
+          chain: appChain,
+          address: selfProfile.userContract as Address,
+          abi: userContractAbi,
+          functionName: "addMessage",
+          args: [invitationEvent, invitationTag],
+        });
+
+        await wait(messageHash);
+      }
 
       onInviteTargetChange("");
       setSyncNonce((value) => value + 1);
