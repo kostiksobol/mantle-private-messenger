@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { createWalletClient, custom, type Address } from "viem";
+import { createWalletClient, custom, type Address, type Hash } from "viem";
 import {
   useAccount,
   useConnect,
@@ -44,36 +44,6 @@ type ChainUser = {
   kind: number;
   metadataURI: string;
 };
-
-function chainUserFrom(value: unknown): ChainUser {
-  const item = value as Partial<ChainUser> & Record<number, unknown>;
-
-  return {
-    userAddress: (item.userAddress ?? item[0]) as Address,
-    login: String(item.login ?? item[1] ?? ""),
-    name: String(item.name ?? item[2] ?? ""),
-    pubkey: String(item.pubkey ?? item[3] ?? ""),
-    userContract: (item.userContract ?? item[4]) as Address,
-    kind: Number(item.kind ?? item[5] ?? 0),
-    metadataURI: String(item.metadataURI ?? item[6] ?? ""),
-  };
-}
-
-function shortAddress(address?: string) {
-  if (!address) {
-    return "—";
-  }
-
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-function isZeroAddress(address: string) {
-  return normalizeAddress(address) === ZERO_ADDRESS;
-}
-
-function toAddress(address: string) {
-  return normalizeAddress(address) as Address;
-}
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -127,12 +97,70 @@ async function switchInjectedWalletToAppChain() {
   }
 }
 
+function chainUserFrom(value: unknown): ChainUser {
+  const item = value as Partial<ChainUser> & Record<number, unknown>;
+
+  return {
+    userAddress: (item.userAddress ?? item[0]) as Address,
+    login: String(item.login ?? item[1] ?? ""),
+    name: String(item.name ?? item[2] ?? ""),
+    pubkey: String(item.pubkey ?? item[3] ?? ""),
+    userContract: (item.userContract ?? item[4]) as Address,
+    kind: Number(item.kind ?? item[5] ?? 0),
+    metadataURI: String(item.metadataURI ?? item[6] ?? ""),
+  };
+}
+
+function toAddress(address: string) {
+  return normalizeAddress(address) as Address;
+}
+
+function isZeroAddress(address: string) {
+  return normalizeAddress(address) === ZERO_ADDRESS;
+}
+
+function shortAddress(address?: string) {
+  if (!address) {
+    return "—";
+  }
+
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function initials(value?: string) {
+  if (!value) {
+    return "?";
+  }
+
+  return value.trim().slice(0, 1).toUpperCase() || "?";
+}
+
+function formatTime(timestamp: number) {
+  if (!timestamp) {
+    return "";
+  }
+
+  return new Date(timestamp * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDateTime(timestamp: number) {
+  if (!timestamp) {
+    return "—";
+  }
+
+  return new Date(timestamp * 1000).toLocaleString();
+}
+
 export default function App() {
   const { address, isConnected, chainId } = useAccount();
   const { connectors, connect, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
 
   const publicClient = usePublicClient({ chainId: appChain.id });
+  const messageScrollerRef = useRef<HTMLDivElement | null>(null);
 
   const ownerAddress = useMemo(() => {
     return address ? toAddress(address) : undefined;
@@ -157,15 +185,17 @@ export default function App() {
   const [keyVersion, setKeyVersion] = useState(0);
   const [syncNonce, setSyncNonce] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [activity, setActivity] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
 
   const [login, setLogin] = useState("");
   const [displayName, setDisplayName] = useState("");
 
-  const [chatName, setChatName] = useState("Demo chat");
+  const [chatName, setChatName] = useState("New chat");
   const [selectedChatId, setSelectedChatId] = useState("");
   const [messageText, setMessageText] = useState("");
   const [inviteTarget, setInviteTarget] = useState("");
+  const [selectedMemberAddress, setSelectedMemberAddress] = useState("");
 
   const rsaKeys = useMemo(() => {
     return ownerAddress ? loadRsaKeyPair(ownerAddress) : undefined;
@@ -225,16 +255,69 @@ export default function App() {
       .equals(ownerAddress)
       .toArray();
 
-    return result.sort((a, b) => a.timestamp - b.timestamp);
+    return result.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) {
+        return a.timestamp - b.timestamp;
+      }
+
+      return a.sourceMessageIndex - b.sourceMessageIndex;
+    });
   }, [ownerAddress]) ?? [];
 
+  const knownUsersByAddress = useMemo(() => {
+    const map = new Map<string, (typeof knownUsers)[number]>();
+
+    for (const user of knownUsers) {
+      map.set(normalizeAddress(user.userAddress), user);
+    }
+
+    return map;
+  }, [knownUsers]);
+
   const selectedChat = chats.find((chat) => chat.chatId === selectedChatId);
-  const selectedMessages = messages.filter(
-    (message) => message.chatId === selectedChatId
-  );
+
   const selectedMembers = chatMembers.filter(
     (member) => member.chatId === selectedChatId
   );
+
+  const selectedMessages = messages.filter(
+    (message) => message.chatId === selectedChatId
+  );
+
+  const selectedMember = selectedMemberAddress
+    ? knownUsersByAddress.get(normalizeAddress(selectedMemberAddress))
+    : undefined;
+
+  const chatsWithPreview = useMemo(() => {
+    return chats
+      .map((chat) => {
+        const chatMessages = messages.filter(
+          (message) => message.chatId === chat.chatId
+        );
+
+        const lastMessage = chatMessages[chatMessages.length - 1];
+
+        return {
+          chat,
+          lastMessage,
+          membersCount: chatMembers.filter(
+            (member) => member.chatId === chat.chatId
+          ).length,
+        };
+      })
+      .sort((a, b) => {
+        const left = a.lastMessage?.timestamp ?? 0;
+        const right = b.lastMessage?.timestamp ?? 0;
+
+        if (left !== right) {
+          return right - left;
+        }
+
+        return a.chat.name.localeCompare(b.chat.name);
+      });
+  }, [chats, chatMembers, messages]);
+
+  const wrongNetwork = isConnected && chainId !== appChain.id;
 
   useEffect(() => {
     if (!selectedChatId && chats.length > 0) {
@@ -251,11 +334,41 @@ export default function App() {
   }, [chats, selectedChatId]);
 
   useEffect(() => {
+    if (selectedMembers.length === 0) {
+      setSelectedMemberAddress("");
+      return;
+    }
+
+    const exists = selectedMembers.some(
+      (member) =>
+        normalizeAddress(member.userAddress) ===
+        normalizeAddress(selectedMemberAddress || "")
+    );
+
+    if (!exists) {
+      setSelectedMemberAddress(selectedMembers[0].userAddress);
+    }
+  }, [selectedMembers, selectedMemberAddress]);
+
+  useEffect(() => {
+    const scroller = messageScrollerRef.current;
+
+    if (!scroller) {
+      return;
+    }
+
+    scroller.scrollTo({
+      top: scroller.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [selectedChatId, selectedMessages.length]);
+
+  useEffect(() => {
     if (!ownerAddress || !publicClient || !MAIN_CONNECTOR_ADDRESS) {
       return;
     }
 
-    addLog("syncer start");
+    addActivity("syncer start");
 
     const stop = startBlockchainSyncer({
       ownerAddress,
@@ -264,15 +377,14 @@ export default function App() {
     });
 
     return () => {
-      addLog("syncer stop");
+      addActivity("syncer stop");
       stop();
     };
   }, [ownerAddress, publicClient, syncNonce]);
 
-  function addLog(message: string) {
+  function addActivity(message: string) {
     const time = new Date().toLocaleTimeString();
-
-    setLog((current) => [`${time} ${message}`, ...current].slice(0, 80));
+    setActivity((current) => [`${time} ${message}`, ...current].slice(0, 80));
   }
 
   async function run(label: string, action: () => Promise<void>) {
@@ -281,14 +393,14 @@ export default function App() {
     }
 
     setBusy(true);
-    addLog(`${label}: start`);
+    addActivity(`${label}: start`);
 
     try {
       await action();
-      addLog(`${label}: ok`);
+      addActivity(`${label}: ok`);
     } catch (error) {
       console.error(error);
-      addLog(`${label}: failed`);
+      addActivity(`${label}: failed`);
       alert(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
@@ -324,7 +436,7 @@ export default function App() {
     };
   }
 
-  async function wait(hash: Address | `0x${string}`) {
+  async function wait(hash: Hash) {
     const { publicClient } = requireWallet();
     await publicClient.waitForTransactionReceipt({ hash });
   }
@@ -332,12 +444,14 @@ export default function App() {
   async function readUserByAddress(userAddress: Address) {
     const { publicClient, mainConnectorAddress } = requireWallet();
 
-    const user = chainUserFrom(await publicClient.readContract({
-      address: mainConnectorAddress,
-      abi: mainConnectorAbi,
-      functionName: "getUserByAddress",
-      args: [userAddress],
-    }));
+    const user = chainUserFrom(
+      await publicClient.readContract({
+        address: mainConnectorAddress,
+        abi: mainConnectorAbi,
+        functionName: "getUserByAddress",
+        args: [userAddress],
+      })
+    );
 
     if (isZeroAddress(user.userAddress)) {
       return undefined;
@@ -349,12 +463,14 @@ export default function App() {
   async function readUserByLogin(userLogin: string) {
     const { publicClient, mainConnectorAddress } = requireWallet();
 
-    const user = chainUserFrom(await publicClient.readContract({
-      address: mainConnectorAddress,
-      abi: mainConnectorAbi,
-      functionName: "getUserByLogin",
-      args: [userLogin],
-    }));
+    const user = chainUserFrom(
+      await publicClient.readContract({
+        address: mainConnectorAddress,
+        abi: mainConnectorAbi,
+        functionName: "getUserByLogin",
+        args: [userLogin],
+      })
+    );
 
     if (isZeroAddress(user.userAddress)) {
       return undefined;
@@ -476,6 +592,7 @@ export default function App() {
 
       await wait(recordHash);
 
+      setChatName("New chat");
       setSelectedChatId(chatId);
       setSyncNonce((value) => value + 1);
     });
@@ -601,302 +718,457 @@ export default function App() {
     });
   }
 
-  const wrongNetwork = isConnected && chainId !== appChain.id;
+  if (!isConnected) {
+    return (
+      <main className="authPage">
+        <section className="authCard">
+          <div className="brandMark">M</div>
 
-  return (
-    <main className="page">
-      <section className="hero">
-        <div>
-          <div className="eyebrow">Mantle Private Messenger</div>
-          <h1>Dev console</h1>
+          <h1>Private Messenger</h1>
+
           <p>
-            Debug UI для проверки регистрации, чатов, сообщений, инвайтов,
-            IndexedDB и blockchain syncer.
+            Wallet-native encrypted messaging over EVM contracts.
           </p>
-        </div>
 
-        <div className="heroActions">
-          {!isConnected ? (
-            <button
-              onClick={() => connect({ connector: connectors[0] })}
-              disabled={!connectors[0] || isConnecting}
-            >
-              Connect wallet
-            </button>
-          ) : (
-            <button className="secondary" onClick={() => disconnect()}>
-              Disconnect
-            </button>
-          )}
+          <button
+            className="primaryButton full"
+            onClick={() => connect({ connector: connectors[0] })}
+            disabled={!connectors[0] || isConnecting}
+          >
+            Connect wallet
+          </button>
 
-          {wrongNetwork && (
-            <button
-              onClick={async () => {
-                await switchInjectedWalletToAppChain();
-                window.location.reload();
-              }}
-            >
-              Switch to configured network
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section className="grid topGrid">
-        <div className="card">
-          <h2>Wallet</h2>
-          <dl>
-            <dt>Address</dt>
-            <dd>{ownerAddress || "—"}</dd>
-
-            <dt>Network</dt>
-            <dd className={wrongNetwork ? "bad" : "good"}>
-              {chainId || "—"}
-            </dd>
-
-            <dt>MainConnector</dt>
-            <dd>{MAIN_CONNECTOR_ADDRESS || "—"}</dd>
-
-            <dt>RSA key</dt>
-            <dd className={rsaKeys ? "good" : "bad"}>
-              {rsaKeys ? "exists" : "missing"}
-            </dd>
-          </dl>
-
-          <div className="row">
-            <button disabled={!isConnected || busy} onClick={handleEnsureKeys}>
-              Ensure RSA keys
-            </button>
-            <button
-              className="danger"
-              disabled={busy}
-              onClick={handleDeleteIndexedDb}
-            >
-              Delete IndexedDB
-            </button>
+          <div className="authHint">
+            Configured network: {appChain.name} · {appChain.id}
           </div>
-        </div>
+        </section>
+      </main>
+    );
+  }
 
-        <div className="card">
-          <h2>Self profile</h2>
-          {selfProfile ? (
-            <dl>
-              <dt>Login</dt>
-              <dd>{selfProfile.login}</dd>
+  if (wrongNetwork) {
+    return (
+      <main className="authPage">
+        <section className="authCard">
+          <div className="brandMark warning">!</div>
 
-              <dt>Name</dt>
-              <dd>{selfProfile.name}</dd>
+          <h1>Wrong network</h1>
 
-              <dt>UserContract</dt>
-              <dd>{selfProfile.userContract}</dd>
+          <p>
+            Your wallet is on chain {chainId}. This app is configured for{" "}
+            {appChain.name} / {appChain.id}.
+          </p>
 
-              <dt>Main cursor</dt>
-              <dd>{selfProfile.mainRecordsCursor}</dd>
-            </dl>
-          ) : (
-            <p className="muted">Not registered / not synced yet.</p>
-          )}
-        </div>
+          <button
+            className="primaryButton full"
+            onClick={async () => {
+              await switchInjectedWalletToAppChain();
+              window.location.reload();
+            }}
+          >
+            Switch network
+          </button>
 
-        <div className="card">
-          <h2>Register</h2>
+          <button className="ghostButton full" onClick={() => disconnect()}>
+            Disconnect
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!selfProfile) {
+    return (
+      <main className="authPage">
+        <section className="authCard onboardingCard">
+          <div className="brandMark">M</div>
+
+          <h1>Create profile</h1>
+
+          <p>
+            Register an on-chain profile. Your RSA key stays in localStorage.
+          </p>
+
+          <div className="statusPills">
+            <span>{shortAddress(ownerAddress)}</span>
+            <span>{appChain.name}</span>
+            <span className={rsaKeys ? "greenPill" : "yellowPill"}>
+              RSA {rsaKeys ? "ready" : "missing"}
+            </span>
+          </div>
+
           <input
-            placeholder="login"
+            placeholder="Login"
             value={login}
             onChange={(event) => setLogin(event.target.value)}
           />
+
           <input
-            placeholder="display name"
+            placeholder="Display name"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
           />
-          <button
-            disabled={!isConnected || wrongNetwork || busy}
-            onClick={handleRegister}
-          >
-            Register
-          </button>
-        </div>
-      </section>
 
-      <section className="grid actionGrid">
-        <div className="card">
-          <h2>Create chat</h2>
-          <input
-            placeholder="chat name"
-            value={chatName}
-            onChange={(event) => setChatName(event.target.value)}
-          />
-          <button
-            disabled={!selfProfile || wrongNetwork || busy}
-            onClick={handleCreateChat}
-          >
-            Create chat
-          </button>
-        </div>
+          <div className="splitButtons">
+            <button disabled={busy} onClick={handleEnsureKeys}>
+              Ensure RSA
+            </button>
 
-        <div className="card">
-          <h2>Send message</h2>
-          <select
-            value={selectedChatId}
-            onChange={(event) => setSelectedChatId(event.target.value)}
-          >
-            <option value="">Select chat</option>
-            {chats.map((chat) => (
-              <option key={chat.chatId} value={chat.chatId}>
-                {chat.name} / {shortAddress(chat.chatId)}
-              </option>
-            ))}
-          </select>
-          <textarea
-            placeholder="message"
-            value={messageText}
-            onChange={(event) => setMessageText(event.target.value)}
-          />
-          <button
-            disabled={!selectedChat || !selfProfile || wrongNetwork || busy}
-            onClick={handleSendMessage}
-          >
-            Send
-          </button>
-        </div>
-
-        <div className="card">
-          <h2>Invite</h2>
-          <input
-            placeholder="login or 0x address"
-            value={inviteTarget}
-            onChange={(event) => setInviteTarget(event.target.value)}
-          />
-          <button
-            disabled={!selectedChat || !selfProfile || wrongNetwork || busy}
-            onClick={handleInvite}
-          >
-            Invite
-          </button>
-        </div>
-      </section>
-
-      <section className="grid dataGrid">
-        <div className="card wide">
-          <h2>Chats</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Chat ID</th>
-                <th>Key</th>
-              </tr>
-            </thead>
-            <tbody>
-              {chats.map((chat) => (
-                <tr
-                  key={chat.chatId}
-                  className={chat.chatId === selectedChatId ? "selected" : ""}
-                  onClick={() => setSelectedChatId(chat.chatId)}
-                >
-                  <td>{chat.name}</td>
-                  <td>{chat.chatId}</td>
-                  <td>{shortAddress(chat.chatKey)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="card">
-          <h2>Selected chat</h2>
-          {selectedChat ? (
-            <dl>
-              <dt>Name</dt>
-              <dd>{selectedChat.name}</dd>
-              <dt>Chat ID</dt>
-              <dd>{selectedChat.chatId}</dd>
-              <dt>Members</dt>
-              <dd>{selectedMembers.length}</dd>
-              <dt>Messages</dt>
-              <dd>{selectedMessages.length}</dd>
-            </dl>
-          ) : (
-            <p className="muted">No chat selected.</p>
-          )}
-        </div>
-      </section>
-
-      <section className="grid dataGrid">
-        <div className="card wide">
-          <h2>Messages</h2>
-          <div className="messages">
-            {selectedMessages.map((message) => (
-              <article key={message.id} className="message">
-                <div className="messageMeta">
-                  <span>{shortAddress(message.authorAddress)}</span>
-                  <span>
-                    {new Date(message.timestamp * 1000).toLocaleString()}
-                  </span>
-                  <span>#{message.sourceMessageIndex}</span>
-                </div>
-                <p>{message.content}</p>
-              </article>
-            ))}
+            <button
+              className="primaryButton"
+              disabled={busy || !login.trim()}
+              onClick={handleRegister}
+            >
+              Register
+            </button>
           </div>
-        </div>
 
-        <div className="card">
-          <h2>Chat members</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Cursor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedMembers.map((member) => (
-                <tr key={member.id}>
-                  <td>{shortAddress(member.userAddress)}</td>
-                  <td>{member.cursor}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <button className="ghostButton full" onClick={() => disconnect()}>
+            Disconnect
+          </button>
 
-      <section className="grid dataGrid">
-        <div className="card wide">
-          <h2>Known users</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Login</th>
-                <th>Name</th>
-                <th>Address</th>
-                <th>UserContract</th>
-              </tr>
-            </thead>
-            <tbody>
-              {knownUsers.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.login}</td>
-                  <td>{user.name}</td>
-                  <td>{user.userAddress}</td>
-                  <td>{user.userContract}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="card logCard">
-          <h2>Activity</h2>
-          <div className="log">
-            {log.map((item, index) => (
+          <div className="miniActivity">
+            {activity.slice(0, 6).map((item, index) => (
               <div key={`${item}-${index}`}>{item}</div>
             ))}
           </div>
-        </div>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="messengerShell">
+      <aside className="chatSidebar">
+        <header className="sidebarHeader">
+          <div>
+            <div className="sidebarTitle">Chats</div>
+            <div className="sidebarSubtitle">
+              {selfProfile.login} · {shortAddress(ownerAddress)}
+            </div>
+          </div>
+
+          <button
+            className="roundButton"
+            title="Disconnect"
+            onClick={() => disconnect()}
+          >
+            ⎋
+          </button>
+        </header>
+
+        <section className="newChatBox">
+          <input
+            placeholder="New chat name"
+            value={chatName}
+            onChange={(event) => setChatName(event.target.value)}
+          />
+
+          <button disabled={busy} onClick={handleCreateChat}>
+            Create
+          </button>
+        </section>
+
+        <nav className="chatList">
+          {chatsWithPreview.length === 0 ? (
+            <div className="emptyState small">
+              <strong>No chats yet</strong>
+              <span>Create your first encrypted chat.</span>
+            </div>
+          ) : (
+            chatsWithPreview.map(({ chat, lastMessage, membersCount }) => (
+              <button
+                key={chat.chatId}
+                className={
+                  chat.chatId === selectedChatId
+                    ? "chatItem active"
+                    : "chatItem"
+                }
+                onClick={() => setSelectedChatId(chat.chatId)}
+              >
+                <div className="avatar">
+                  {initials(chat.name)}
+                </div>
+
+                <div className="chatItemBody">
+                  <div className="chatItemTop">
+                    <span>{chat.name}</span>
+                    <time>{lastMessage ? formatTime(lastMessage.timestamp) : ""}</time>
+                  </div>
+
+                  <div className="chatPreview">
+                    {lastMessage
+                      ? lastMessage.content
+                      : `${membersCount} member${membersCount === 1 ? "" : "s"}`}
+                  </div>
+                </div>
+              </button>
+            ))
+          )}
+        </nav>
+
+        <footer className="sidebarFooter">
+          <button
+            className="ghostButton full"
+            onClick={() => setShowDebug((value) => !value)}
+          >
+            {showDebug ? "Hide debug" : "Show debug"}
+          </button>
+        </footer>
+      </aside>
+
+      <section className="conversationPanel">
+        {selectedChat ? (
+          <>
+            <header className="conversationHeader">
+              <div>
+                <h1>{selectedChat.name}</h1>
+                <p>
+                  {selectedMembers.length} members · {selectedMessages.length} messages
+                </p>
+              </div>
+
+              <div className="networkBadge">
+                {appChain.name}
+              </div>
+            </header>
+
+            <div ref={messageScrollerRef} className="messageScroller">
+              {selectedMessages.length === 0 ? (
+                <div className="emptyConversation">
+                  <span>No visible messages yet.</span>
+                </div>
+              ) : (
+                selectedMessages.map((message) => {
+                  const isMine =
+                    normalizeAddress(message.authorAddress) === ownerAddress;
+
+                  const author = knownUsersByAddress.get(
+                    normalizeAddress(message.authorAddress)
+                  );
+
+                  const authorName =
+                    author?.name ||
+                    author?.login ||
+                    shortAddress(message.authorAddress);
+
+                  return (
+                    <article
+                      key={message.id}
+                      className={isMine ? "messageBubble mine" : "messageBubble"}
+                    >
+                      {!isMine && (
+                        <div className="messageAuthor">
+                          {authorName}
+                        </div>
+                      )}
+
+                      <div className="messageText">
+                        {message.content}
+                      </div>
+
+                      <div className="messageMeta">
+                        <span>{formatTime(message.timestamp)}</span>
+                        <span>#{message.sourceMessageIndex}</span>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
+            </div>
+
+            <form
+              className="composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSendMessage();
+              }}
+            >
+              <textarea
+                placeholder="Write a message..."
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void handleSendMessage();
+                  }
+                }}
+              />
+
+              <button disabled={busy || !messageText.trim()}>
+                Send
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="noChatSelected">
+            <div className="brandMark">M</div>
+            <h1>Select a chat</h1>
+            <p>Choose a chat from the left sidebar or create a new one.</p>
+          </div>
+        )}
       </section>
+
+      <aside className="detailsPanel">
+        <header className="detailsHeader">
+          <h2>Chat info</h2>
+          <p>{selectedChat?.name || "No chat selected"}</p>
+        </header>
+
+        {selectedChat ? (
+          <>
+            <section className="inviteBox">
+              <label>Invite user</label>
+
+              <div className="inviteRow">
+                <input
+                  placeholder="login or 0x address"
+                  value={inviteTarget}
+                  onChange={(event) => setInviteTarget(event.target.value)}
+                />
+
+                <button
+                  disabled={busy || !inviteTarget.trim()}
+                  onClick={handleInvite}
+                >
+                  Invite
+                </button>
+              </div>
+            </section>
+
+            <section className="membersBox">
+              <h3>Members</h3>
+
+              <div className="memberList">
+                {selectedMembers.map((member) => {
+                  const user = knownUsersByAddress.get(
+                    normalizeAddress(member.userAddress)
+                  );
+
+                  const name =
+                    user?.name ||
+                    user?.login ||
+                    shortAddress(member.userAddress);
+
+                  const active =
+                    normalizeAddress(member.userAddress) ===
+                    normalizeAddress(selectedMemberAddress || "");
+
+                  return (
+                    <button
+                      key={`${member.chatId}:${member.userAddress}`}
+                      className={active ? "memberItem active" : "memberItem"}
+                      onClick={() => setSelectedMemberAddress(member.userAddress)}
+                    >
+                      <div className="avatar memberAvatar">
+                        {initials(name)}
+                      </div>
+
+                      <div>
+                        <div className="memberName">{name}</div>
+                        <div className="memberMeta">
+                          {shortAddress(member.userAddress)} · cursor {member.cursor}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="memberDetails">
+              <h3>Participant details</h3>
+
+              {selectedMember ? (
+                <dl>
+                  <dt>Login</dt>
+                  <dd>{selectedMember.login}</dd>
+
+                  <dt>Name</dt>
+                  <dd>{selectedMember.name}</dd>
+
+                  <dt>Address</dt>
+                  <dd>{selectedMember.userAddress}</dd>
+
+                  <dt>Contract</dt>
+                  <dd>{selectedMember.userContract}</dd>
+
+                  <dt>Kind</dt>
+                  <dd>{selectedMember.kind === 0 ? "Human" : "Agent"}</dd>
+
+                  <dt>Metadata</dt>
+                  <dd>{selectedMember.metadataURI || "—"}</dd>
+                </dl>
+              ) : selectedMemberAddress ? (
+                <dl>
+                  <dt>Address</dt>
+                  <dd>{selectedMemberAddress}</dd>
+                </dl>
+              ) : (
+                <p className="muted">
+                  Select a participant to inspect profile data.
+                </p>
+              )}
+            </section>
+          </>
+        ) : (
+          <div className="emptyState">
+            Select a chat to see participants.
+          </div>
+        )}
+      </aside>
+
+      {showDebug && (
+        <section className="debugPanel">
+          <header>
+            <div>
+              <h2>Debug</h2>
+              <p>IndexedDB, sync activity and cursors.</p>
+            </div>
+
+            <button className="dangerButton" onClick={handleDeleteIndexedDb}>
+              Delete IndexedDB
+            </button>
+          </header>
+
+          <div className="debugGrid">
+            <div>
+              <h3>Profile</h3>
+              <pre>{JSON.stringify(selfProfile, null, 2)}</pre>
+            </div>
+
+            <div>
+              <h3>Activity</h3>
+              <pre>{activity.join("\n")}</pre>
+            </div>
+
+            <div>
+              <h3>Chats</h3>
+              <pre>{JSON.stringify(chats, null, 2)}</pre>
+            </div>
+
+            <div>
+              <h3>Members</h3>
+              <pre>{JSON.stringify(chatMembers, null, 2)}</pre>
+            </div>
+
+            <div>
+              <h3>Messages</h3>
+              <pre>
+                {JSON.stringify(
+                  messages.map((message) => ({
+                    ...message,
+                    time: formatDateTime(message.timestamp),
+                  })),
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
