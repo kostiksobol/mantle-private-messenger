@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
 import { createWalletClient, custom, type Address, type Hash } from "viem";
 import {
   useAccount,
@@ -44,6 +43,7 @@ import {
   createMessagePayload,
   encodePayload,
 } from "./lib/protocol/payloads";
+import { useMessengerData } from "./hooks/useMessengerData";
 
 type ChainUser = {
   userAddress: Address;
@@ -176,121 +176,23 @@ export default function App() {
     return ownerAddress ? loadRsaKeyPair(ownerAddress) : undefined;
   }, [ownerAddress, keyVersion]);
 
-  const selfProfile = useLiveQuery(async () => {
-    if (!ownerAddress) {
-      return undefined;
-    }
-
-    return db.selfProfiles
-      .where("ownerAddress")
-      .equals(ownerAddress)
-      .first();
-  }, [ownerAddress]);
-
-  const chats = useLiveQuery(async () => {
-    if (!ownerAddress) {
-      return [];
-    }
-
-    return db.chats
-      .where("ownerAddress")
-      .equals(ownerAddress)
-      .toArray();
-  }, [ownerAddress]) ?? [];
-
-  const knownUsers = useLiveQuery(async () => {
-    if (!ownerAddress) {
-      return [];
-    }
-
-    return db.knownUsers
-      .where("ownerAddress")
-      .equals(ownerAddress)
-      .toArray();
-  }, [ownerAddress]) ?? [];
-
-  const chatMembers = useLiveQuery(async () => {
-    if (!ownerAddress) {
-      return [];
-    }
-
-    return db.chatMembers
-      .where("ownerAddress")
-      .equals(ownerAddress)
-      .toArray();
-  }, [ownerAddress]) ?? [];
-
-  const messages = useLiveQuery(async () => {
-    if (!ownerAddress) {
-      return [];
-    }
-
-    const result = await db.messages
-      .where("ownerAddress")
-      .equals(ownerAddress)
-      .toArray();
-
-    return result.sort((a, b) => {
-      if (a.timestamp !== b.timestamp) {
-        return a.timestamp - b.timestamp;
-      }
-
-      return a.sourceMessageIndex - b.sourceMessageIndex;
-    });
-  }, [ownerAddress]) ?? [];
-
-  const knownUsersByAddress = useMemo(() => {
-    const map = new Map<string, (typeof knownUsers)[number]>();
-
-    for (const user of knownUsers) {
-      map.set(normalizeAddress(user.userAddress), user);
-    }
-
-    return map;
-  }, [knownUsers]);
-
-  const selectedChat = chats.find((chat) => chat.chatId === selectedChatId);
-
-  const selectedMembers = chatMembers.filter(
-    (member) => member.chatId === selectedChatId
-  );
-
-  const selectedMessages = messages.filter(
-    (message) => message.chatId === selectedChatId
-  );
-
-  const selectedMember = selectedMemberAddress
-    ? knownUsersByAddress.get(normalizeAddress(selectedMemberAddress))
-    : undefined;
-
-  const chatsWithPreview = useMemo(() => {
-    return chats
-      .map((chat) => {
-        const chatMessages = messages.filter(
-          (message) => message.chatId === chat.chatId
-        );
-
-        const lastMessage = chatMessages[chatMessages.length - 1];
-
-        return {
-          chat,
-          lastMessage,
-          membersCount: chatMembers.filter(
-            (member) => member.chatId === chat.chatId
-          ).length,
-        };
-      })
-      .sort((a, b) => {
-        const left = a.lastMessage?.timestamp ?? 0;
-        const right = b.lastMessage?.timestamp ?? 0;
-
-        if (left !== right) {
-          return right - left;
-        }
-
-        return a.chat.name.localeCompare(b.chat.name);
-      });
-  }, [chats, chatMembers, messages]);
+  const {
+    selfProfile,
+    chats,
+    knownUsers,
+    chatMembers,
+    messages,
+    knownUsersByAddress,
+    selectedChat,
+    selectedMembers,
+    selectedMessages,
+    selectedMember,
+    chatsWithPreview,
+  } = useMessengerData({
+    ownerAddress,
+    selectedChatId,
+    selectedMemberAddress,
+  });
 
   const wrongNetwork = isConnected && chainId !== appChain.id;
 
