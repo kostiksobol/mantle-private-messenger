@@ -17,6 +17,7 @@ import { useAppWallet } from "./hooks/useAppWallet";
 import { useBlockchainSyncer } from "./hooks/useBlockchainSyncer";
 import { useMessengerData } from "./hooks/useMessengerData";
 import { useMessengerActions } from "./hooks/useMessengerActions";
+import { useIpfsMode } from "./hooks/useIpfsMode";
 
 export default function App() {
   const {
@@ -139,6 +140,8 @@ export default function App() {
     });
   }, [selectedChatId, selectedMessages.length]);
 
+  const { ipfsStatus, ipfsChecking, checkIpfs } = useIpfsMode();
+
   useBlockchainSyncer({
     ownerAddress,
     publicClient,
@@ -238,6 +241,9 @@ export default function App() {
         onInviteTargetChange={setInviteTarget}
         onInvite={handleInvite}
         onSelectMemberAddress={setSelectedMemberAddress}
+        ipfsStatus={ipfsStatus}
+        ipfsChecking={ipfsChecking}
+        onCheckIpfs={checkIpfs}
       />
 
       {showDebug && (

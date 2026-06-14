@@ -1729,3 +1729,393 @@ textarea:focus {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+/* Production polish: softer headings and calmer account block */
+
+.sidebarTitle {
+  display: none;
+}
+
+.chatSidebar .sidebarHeader {
+  align-items: flex-start;
+  min-height: 124px;
+  height: auto;
+  padding: 22px 24px 20px;
+}
+
+.sidebarIdentity {
+  width: min(260px, 100%);
+}
+
+.accountStrip {
+  width: min(210px, 100%);
+  margin-top: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(15, 23, 42, 0.3));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 12px 30px rgba(0, 0, 0, 0.1);
+}
+
+.accountStrip:hover {
+  border-color: rgba(148, 163, 184, 0.2);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(15, 23, 42, 0.36));
+}
+
+.accountSummary {
+  min-height: 58px;
+  padding: 11px 13px 12px;
+}
+
+.accountLabel {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.accountSummaryText strong {
+  color: var(--text-soft);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.accountChevron {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.accountStrip[open] {
+  width: min(320px, 100%);
+}
+
+.accountStrip[open] .accountSummary {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.accountExpanded {
+  padding: 0 13px 13px;
+}
+
+.accountField span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.accountField strong {
+  color: var(--text-soft);
+}
+
+.accountAddressField code {
+  color: var(--text-muted);
+  background: rgba(2, 6, 23, 0.22);
+  border-color: rgba(148, 163, 184, 0.12);
+}
+
+/* Softer center header, closer to the tone of right panel headings */
+
+.conversationHeader h1 {
+  color: var(--text-soft);
+  font-size: 24px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.conversationHeader p {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+/* Softer chat list typography */
+
+.chatItemTop span {
+  color: var(--text-soft);
+  font-weight: 950;
+}
+
+.chatPreview {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+/* Make sidebar controls visually calmer */
+
+.chatSearchBox {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(148, 163, 184, 0.12);
+}
+
+.chatSearchBox:focus-within {
+  border-color: rgba(96, 165, 250, 0.34);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.newChatToggle {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(96, 165, 250, 0.18);
+}
+
+.newChatToggle:hover,
+.newChatToggle.active {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(96, 165, 250, 0.34);
+}
+
+/* Right-panel heading tone reused more consistently */
+
+.sectionTitleRow h3,
+.inviteDisclosure summary,
+.compactMemberDetails h3,
+.membersBox h3,
+.memberDetails h3 {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cleanDetailsPanel {
+  grid-template-rows:
+    minmax(180px, 1fr)
+    auto
+    auto
+    minmax(140px, 0.65fr);
+}
+
+.ipfsStatusBox {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.ipfsStatusBox label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ipfsStatusBox strong {
+  display: block;
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.ipfsStatusBox p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ipfsStatusBox.connected strong {
+  color: #bfdbfe;
+}
+
+.ipfsStatusActions {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ipfsStatusActions button,
+.ipfsModal footer button {
+  min-height: 38px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.ipfsStatusActions button:disabled,
+.ipfsModal footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.ipfsModal {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+}
+
+.ipfsModal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ipfsModal header span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.ipfsModal h2 {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.modalCloseButton {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.ipfsModal ol {
+  margin: 0;
+  padding: 20px 24px 8px 44px;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
+
+.ipfsHelpBlock {
+  padding: 14px 24px;
+}
+
+.ipfsHelpBlock h3 {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.ipfsHelpBlock p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.ipfsHelpBlock code,
+.ipfsHelpBlock pre {
+  display: block;
+  user-select: text;
+  overflow-x: auto;
+  margin-top: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  padding: 12px;
+  color: var(--text-soft);
+  background: rgba(2, 6, 23, 0.35);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ipfsModal footer {
+  padding: 18px 24px 24px;
+}
+
+.attachmentList {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachmentCard {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  max-width: 360px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  color: inherit;
+  text-decoration: none;
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.attachmentCard:hover {
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.attachmentIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.14);
+  font-weight: 950;
+}
+
+.attachmentInfo {
+  min-width: 0;
+}
+
+.attachmentInfo strong,
+.attachmentInfo span,
+.attachmentInfo small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentInfo strong {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.attachmentInfo span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.attachmentInfo small {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+}

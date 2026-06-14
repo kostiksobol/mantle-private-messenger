@@ -1,21 +1,3 @@
-/**
- * Creator-rooted chat protocol.
- *
- * MainConnector record is RSA-encrypted for one recipient:
- *   { chatKey, creator }
- *
- * UserContract owner is always the author of decrypted chat events.
- *
- * ChatCreation:
- *   { event: "ChatCreation", name }
- *
- * Invitation:
- *   { event: "Invitation", invited }
- *
- * Membership is discovered by starting from creator and then reading every
- * known member's UserContract. Each Invitation adds its invited user.
- */
-
 export type MainInvitationPayload = {
   chatKey: string;
   creator: string;
@@ -31,9 +13,18 @@ export type InvitationPayload = {
   invited: string;
 };
 
+export type MessageAttachmentPayload = {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+  encryptedSize?: number;
+};
+
 export type MessagePayload = {
   event: "Message";
   text: string;
+  attachments?: MessageAttachmentPayload[];
 };
 
 export type ChatEventPayload =
@@ -41,94 +32,131 @@ export type ChatEventPayload =
   | InvitationPayload
   | MessagePayload;
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+function parseJson(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
 
-function parseJson(value: string) {
   try {
-    return JSON.parse(value) as unknown;
+    return JSON.parse(value);
   } catch {
     return undefined;
   }
 }
 
-export function encodePayload(payload: object) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function parseAttachments(value: unknown): MessageAttachmentPayload[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+
+  const attachments: MessageAttachmentPayload[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) return undefined;
+
+    const { url, name, mime, size, encryptedSize } = item;
+
+    if (!isString(url) || !url) return undefined;
+    if (!isString(name) || !name) return undefined;
+    if (!isString(mime) || !mime) return undefined;
+    if (!isNumber(size) || size < 0) return undefined;
+
+    if (
+      encryptedSize !== undefined &&
+      (!isNumber(encryptedSize) || encryptedSize < 0)
+    ) {
+      return undefined;
+    }
+
+    attachments.push({
+      url,
+      name,
+      mime,
+      size,
+      ...(encryptedSize !== undefined ? { encryptedSize } : {}),
+    });
+  }
+
+  return attachments;
+}
+
+export function encodePayload(payload: MainInvitationPayload | ChatEventPayload) {
   return JSON.stringify(payload);
 }
 
-export function createMainInvitationPayload(input: {
-  chatKey: string;
-  creator: string;
-}): MainInvitationPayload {
+export function createMainInvitationPayload(
+  chatKey: string,
+  creator: string
+): MainInvitationPayload {
   return {
-    chatKey: input.chatKey,
-    creator: input.creator,
+    chatKey,
+    creator,
   };
 }
 
-export function createChatCreationPayload(input: {
-  name: string;
-}): ChatCreationPayload {
+export function createChatCreationPayload(name: string): ChatCreationPayload {
   return {
     event: "ChatCreation",
-    name: input.name,
+    name,
   };
 }
 
-export function createInvitationPayload(input: {
-  invited: string;
-}): InvitationPayload {
+export function createInvitationPayload(invited: string): InvitationPayload {
   return {
     event: "Invitation",
-    invited: input.invited,
+    invited,
   };
 }
 
-export function createMessagePayload(input: {
-  text: string;
-}): MessagePayload {
+export function createMessagePayload(
+  text: string,
+  attachments?: MessageAttachmentPayload[]
+): MessagePayload {
   return {
     event: "Message",
-    text: input.text,
+    text,
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
   };
 }
 
 export function parseMainInvitationPayload(
-  value: string
+  value: unknown
 ): MainInvitationPayload | undefined {
   const parsed = parseJson(value);
 
-  if (!isObject(parsed)) {
-    return undefined;
-  }
+  if (!isRecord(parsed)) return undefined;
 
-  if (
-    typeof parsed.chatKey !== "string" ||
-    typeof parsed.creator !== "string"
-  ) {
-    return undefined;
-  }
+  const { chatKey, creator } = parsed;
+
+  if (!isString(chatKey) || !chatKey) return undefined;
+  if (!isString(creator) || !creator) return undefined;
 
   return {
-    chatKey: parsed.chatKey,
-    creator: parsed.creator,
+    chatKey,
+    creator,
   };
 }
 
 export function parseChatEventPayload(
-  value: string
+  value: unknown
 ): ChatEventPayload | undefined {
   const parsed = parseJson(value);
 
-  if (!isObject(parsed) || typeof parsed.event !== "string") {
-    return undefined;
-  }
+  if (!isRecord(parsed)) return undefined;
 
   if (parsed.event === "ChatCreation") {
-    if (typeof parsed.name !== "string") {
-      return undefined;
-    }
+    if (!isString(parsed.name) || !parsed.name) return undefined;
 
     return {
       event: "ChatCreation",
@@ -137,9 +165,7 @@ export function parseChatEventPayload(
   }
 
   if (parsed.event === "Invitation") {
-    if (typeof parsed.invited !== "string") {
-      return undefined;
-    }
+    if (!isString(parsed.invited) || !parsed.invited) return undefined;
 
     return {
       event: "Invitation",
@@ -148,13 +174,18 @@ export function parseChatEventPayload(
   }
 
   if (parsed.event === "Message") {
-    if (typeof parsed.text !== "string") {
+    if (!isString(parsed.text)) return undefined;
+
+    const attachments = parseAttachments(parsed.attachments);
+
+    if (parsed.attachments !== undefined && !attachments) {
       return undefined;
     }
 
     return {
       event: "Message",
       text: parsed.text,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     };
   }
 

@@ -13,6 +13,7 @@
     "@tanstack/react-query": "^5.101.0",
     "dexie": "^4.4.3",
     "dexie-react-hooks": "^4.4.0",
+    "kubo-rpc-client": "^7.1.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "viem": "^2.52.2",

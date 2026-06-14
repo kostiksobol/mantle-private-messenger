@@ -1,6 +1,8 @@
 import { normalizeAddress } from "../lib/db";
 import { initials, shortAddress } from "./format";
+import { IpfsStatusBox } from "./IpfsStatusBox";
 import type { ChatMember, KnownUser, LocalChat } from "./types";
+import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
 
 type DetailsPanelProps = {
   selectedChat?: LocalChat;
@@ -13,6 +15,9 @@ type DetailsPanelProps = {
   onInviteTargetChange: (value: string) => void;
   onInvite: () => Promise<void>;
   onSelectMemberAddress: (value: string) => void;
+  ipfsStatus: LocalIpfsStatus;
+  ipfsChecking: boolean;
+  onCheckIpfs: () => Promise<void>;
 };
 
 function memberLabel(user: KnownUser | undefined, fallbackAddress: string) {
@@ -30,6 +35,9 @@ export function DetailsPanel({
   onInviteTargetChange,
   onInvite,
   onSelectMemberAddress,
+  ipfsStatus,
+  ipfsChecking,
+  onCheckIpfs,
 }: DetailsPanelProps) {
   return (
     <aside className="detailsPanel cleanDetailsPanel">
@@ -83,6 +91,12 @@ export function DetailsPanel({
               })}
             </div>
           </section>
+
+          <IpfsStatusBox
+            status={ipfsStatus}
+            checking={ipfsChecking}
+            onCheck={onCheckIpfs}
+          />
 
           <details className="inviteDisclosure">
             <summary>Invite member</summary>

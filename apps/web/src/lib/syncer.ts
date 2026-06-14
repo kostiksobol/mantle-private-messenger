@@ -20,6 +20,7 @@ import {
 import {
   parseChatEventPayload,
   parseMainInvitationPayload,
+  type MessageAttachmentPayload,
 } from "./protocol/payloads";
 
 type ChainUser = {
@@ -50,30 +51,6 @@ function asAddress(value: string) {
 
 function isZeroAddress(address: string) {
   return normalizeAddress(address) === ZERO_ADDRESS;
-}
-
-function chainUserFrom(value: unknown): ChainUser {
-  const item = value as Partial<ChainUser> & Record<number, unknown>;
-
-  return {
-    userAddress: (item.userAddress ?? item[0]) as Address,
-    login: String(item.login ?? item[1] ?? ""),
-    name: String(item.name ?? item[2] ?? ""),
-    pubkey: String(item.pubkey ?? item[3] ?? ""),
-    userContract: (item.userContract ?? item[4]) as Address,
-    kind: Number(item.kind ?? item[5] ?? 0),
-    metadataURI: String(item.metadataURI ?? item[6] ?? ""),
-  };
-}
-
-function chainMessageFrom(value: unknown): ChainMessage {
-  const item = value as Partial<ChainMessage> & Record<number, unknown>;
-
-  return {
-    encryptedContent: String(item.encryptedContent ?? item[0] ?? ""),
-    tag: String(item.tag ?? item[1] ?? ""),
-    timestamp: BigInt(String(item.timestamp ?? item[2] ?? 0)),
-  };
 }
 
 export function startBlockchainSyncer(options: SyncerOptions) {
@@ -111,17 +88,23 @@ class BlockchainSyncer {
   }
 
   async start() {
-    await this.bootstrap();
+    try {
+      await this.bootstrap();
 
-    if (this.stopped) {
-      return;
+      if (this.stopped) {
+        return;
+      }
+
+      this.watchMainConnector();
+      await this.refreshUserContractWatcher();
+
+      await this.syncMainRecords();
+      await this.syncAllKnownUserContracts();
+    } catch (error) {
+      if (!this.stopped) {
+        console.error("[syncer] start", error);
+      }
     }
-
-    this.watchMainConnector();
-    await this.refreshUserContractWatcher();
-
-    await this.syncMainRecords();
-    await this.syncAllKnownUserContracts();
   }
 
   stop() {
@@ -234,16 +217,28 @@ class BlockchainSyncer {
   private async syncSelfProfile() {
     const chainUser = await this.readUser(this.ownerAddress);
 
-    if (!chainUser) {
+    if (!chainUser || this.stopped) {
       return undefined;
     }
 
+    await this.putSelfProfile(chainUser);
+
+    if (this.stopped) {
+      return undefined;
+    }
+
+    await this.upsertKnownUser(chainUser);
+
+    return chainUser;
+  }
+
+  private async putSelfProfile(chainUser: ChainUser) {
     const existing = await db.selfProfiles
       .where("ownerAddress")
       .equals(this.ownerAddress)
       .first();
 
-    await db.selfProfiles.put({
+    const profile = {
       id: existing?.id,
       ownerAddress: this.ownerAddress,
       login: chainUser.login,
@@ -253,11 +248,27 @@ class BlockchainSyncer {
       kind: Number(chainUser.kind),
       metadataURI: chainUser.metadataURI,
       mainRecordsCursor: existing?.mainRecordsCursor ?? 0,
-    });
+    };
 
-    await this.upsertKnownUser(chainUser);
+    try {
+      await db.selfProfiles.put(profile);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "ConstraintError") {
+        throw error;
+      }
 
-    return chainUser;
+      const latest = await db.selfProfiles
+        .where("ownerAddress")
+        .equals(this.ownerAddress)
+        .first();
+
+      await db.selfProfiles.put({
+        ...profile,
+        id: latest?.id,
+        mainRecordsCursor:
+          latest?.mainRecordsCursor ?? existing?.mainRecordsCursor ?? 0,
+      });
+    }
   }
 
   private async syncMainRecords() {
@@ -329,6 +340,7 @@ class BlockchainSyncer {
       name: "Unnamed chat",
       chatKey: payload.chatKey,
       creatorAddress,
+      creatorVerified: false,
     });
 
     const self = await db.selfProfiles
@@ -363,7 +375,7 @@ class BlockchainSyncer {
 
       const userContracts = Array.from(
         new Set(members.map((member) => asAddress(member.userContract)))
-      ).sort();
+      );
 
       for (const userContract of userContracts) {
         if (this.stopped) {
@@ -405,7 +417,7 @@ class BlockchainSyncer {
 
     for (let offset = 0; offset < messages.length; offset++) {
       const sourceMessageIndex = minCursor + offset;
-      const message = chainMessageFrom(messages[offset]);
+      const message = messages[offset] as ChainMessage;
 
       const currentMembers = await db.chatMembers
         .where("userContract")
@@ -425,8 +437,6 @@ class BlockchainSyncer {
         });
       }
     }
-
-    await this.refreshUserContractWatcher();
   }
 
   private async processUserContractMessage(input: {
@@ -473,17 +483,19 @@ class BlockchainSyncer {
       return;
     }
 
-    if (payload.event === "ChatCreation") {
-      const isCreator =
-        asAddress(input.member.userAddress) === asAddress(chat.creatorAddress);
+    const timestamp = Number(input.message.timestamp);
 
-      if (isCreator) {
+    if (payload.event === "ChatCreation") {
+      if (
+        normalizeAddress(input.member.userAddress) ===
+        normalizeAddress(chat.creatorAddress)
+      ) {
         await this.upsertChat({
           ownerAddress: this.ownerAddress,
           chatId: chat.chatId,
           name: payload.name,
           chatKey: chat.chatKey,
-          creatorAddress: chat.creatorAddress,
+          creatorAddress: asAddress(chat.creatorAddress),
           creatorVerified: true,
         });
 
@@ -494,7 +506,7 @@ class BlockchainSyncer {
           authorUserContract: input.member.userContract,
           sourceMessageIndex: input.sourceMessageIndex,
           content: `Chat created: ${payload.name}`,
-          timestamp: Number(input.message.timestamp),
+          timestamp,
           event: "ChatCreation",
         });
       }
@@ -518,9 +530,9 @@ class BlockchainSyncer {
         authorUserContract: input.member.userContract,
         sourceMessageIndex: input.sourceMessageIndex,
         content: "Invitation",
-        timestamp: Number(input.message.timestamp),
+        timestamp,
         event: "Invitation",
-        invitedAddress: normalizeAddress(payload.invited),
+        invitedAddress: payload.invited,
       });
     }
 
@@ -532,8 +544,9 @@ class BlockchainSyncer {
         authorUserContract: input.member.userContract,
         sourceMessageIndex: input.sourceMessageIndex,
         content: payload.text,
-        timestamp: Number(input.message.timestamp),
+        timestamp,
         event: "Message",
+        attachments: payload.attachments,
       });
     }
 
@@ -569,7 +582,7 @@ class BlockchainSyncer {
       args: [userAddress],
     });
 
-    const chainUser = chainUserFrom(user);
+    const chainUser = user as ChainUser;
 
     if (isZeroAddress(chainUser.userAddress)) {
       return undefined;
@@ -616,7 +629,7 @@ class BlockchainSyncer {
           : chat.name,
       chatKey: chat.chatKey,
       creatorAddress: asAddress(chat.creatorAddress),
-      creatorVerified: existing?.creatorVerified || chat.creatorVerified || false,
+      creatorVerified: chat.creatorVerified ?? existing?.creatorVerified,
     });
   }
 
@@ -656,6 +669,7 @@ class BlockchainSyncer {
     timestamp: number;
     event?: LocalMessageEvent;
     invitedAddress?: string;
+    attachments?: MessageAttachmentPayload[];
   }) {
     const existing = await db.messages
       .where("[ownerAddress+chatId+authorUserContract+sourceMessageIndex]")
@@ -679,10 +693,13 @@ class BlockchainSyncer {
       sourceMessageIndex: input.sourceMessageIndex,
       content: input.content,
       timestamp: input.timestamp,
-      event: input.event,
-      invitedAddress: input.invitedAddress
-        ? asAddress(input.invitedAddress)
-        : undefined,
+      ...(input.event ? { event: input.event } : {}),
+      ...(input.invitedAddress
+        ? { invitedAddress: asAddress(input.invitedAddress) }
+        : {}),
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments }
+        : {}),
     });
   }
 

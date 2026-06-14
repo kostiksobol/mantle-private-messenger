@@ -31,6 +31,13 @@ function userLabel(
   return user?.name || user?.login || shortAddress(address);
 }
 
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
 function systemMessageText(
   message: LocalMessage,
   selectedChat: LocalChat,
@@ -134,6 +141,28 @@ export function ConversationPanel({
                       <span>{formatTime(message.timestamp)}</span>
                       <span>#{message.sourceMessageIndex}</span>
                     </div>
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className="attachmentList">
+                        {message.attachments.map((attachment) => (
+                          <a
+                            className="attachmentCard"
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            key={`${message.id ?? message.sourceMessageIndex}:${attachment.url}`}
+                          >
+                            <div className="attachmentIcon">↗</div>
+                            <div className="attachmentInfo">
+                              <strong>{attachment.name}</strong>
+                              <span>
+                                {attachment.mime} · {formatFileSize(attachment.size)}
+                              </span>
+                              <small>IPFS attachment</small>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </article>
                 );
               })

@@ -43,6 +43,14 @@ export type ChatMember = {
 
 export type LocalMessageEvent = "Message" | "ChatCreation" | "Invitation";
 
+export type LocalMessageAttachment = {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+  encryptedSize?: number;
+};
+
 export type LocalMessage = {
   id?: number;
   ownerAddress: string;
@@ -54,6 +62,7 @@ export type LocalMessage = {
   timestamp: number;
   event?: LocalMessageEvent;
   invitedAddress?: string;
+  attachments?: LocalMessageAttachment[];
 };
 
 export type ChatWithPreview = {
