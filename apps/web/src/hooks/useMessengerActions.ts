@@ -8,6 +8,8 @@ import {
   generateMessageTag,
 } from "../lib/crypto/hmac";
 import { rsaEncrypt } from "../lib/crypto/rsa";
+import { encryptFileBlob } from "../lib/ipfs/fileCrypto";
+import { uploadBlobToLocalIpfs } from "../lib/ipfs/localIpfs";
 import { db, normalizeAddress } from "../lib/db";
 import { ensureRsaKeyPair, loadRsaKeyPair } from "../lib/localKeys";
 import {
@@ -26,6 +28,7 @@ import {
   encodePayload,
 } from "../lib/protocol/payloads";
 import type { LocalChat, SelfProfile } from "../components/types";
+import type { MessageAttachmentPayload } from "../lib/protocol/payloads";
 
 type ChainUser = {
   userAddress: Address;
@@ -76,6 +79,24 @@ function toAddress(address: string) {
 function isZeroAddress(address: string) {
   return normalizeAddress(address) === ZERO_ADDRESS;
 }
+
+async function uploadFileAttachment(
+  chatKey: string,
+  file: File
+): Promise<MessageAttachmentPayload> {
+  const encryptedFile = await encryptFileBlob(chatKey, file);
+  const uploaded = await uploadBlobToLocalIpfs(encryptedFile.blob);
+
+  return {
+    url: uploaded.url,
+    name: file.name || "attachment",
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+    iv: encryptedFile.iv,
+    encryptedSize: uploaded.encryptedSize,
+  };
+}
+
 
 export function useMessengerActions({
   ownerAddress,
@@ -349,7 +370,7 @@ export function useMessengerActions({
     wait,
   ]);
 
-  const handleSendMessage = useCallback(async () => {
+  const handleSendMessage = useCallback(async (attachmentFiles: File[] = []) => {
     await run("send message", async () => {
       const wallet = requireWallet();
 
@@ -361,16 +382,24 @@ export function useMessengerActions({
         throw new Error("Select chat");
       }
 
-      if (!messageText.trim()) {
+      const text = messageText.trim();
+      const files = attachmentFiles.filter((file) => file.size > 0);
+
+      if (!text && files.length === 0) {
         throw new Error("Message is empty");
+      }
+
+      const attachments: MessageAttachmentPayload[] = [];
+
+      for (const file of files) {
+        addActivity(`upload file: ${file.name || "attachment"}`);
+        attachments.push(await uploadFileAttachment(selectedChat.chatKey, file));
       }
 
       const encrypted = await aesEncrypt(
         selectedChat.chatKey,
         encodePayload(
-          createMessagePayload({
-            text: messageText.trim(),
-          })
+          createMessagePayload(text, attachments)
         )
       );
 
@@ -391,6 +420,7 @@ export function useMessengerActions({
       setSyncNonce((value) => value + 1);
     });
   }, [
+    addActivity,
     messageText,
     onMessageTextChange,
     requireWallet,

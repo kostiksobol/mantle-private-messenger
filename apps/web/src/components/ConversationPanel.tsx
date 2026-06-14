@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 
 import { normalizeAddress } from "../lib/db";
 import { formatTime, shortAddress } from "./format";
 import type { ChatMember, KnownUser, LocalChat, LocalMessage } from "./types";
+import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
 
 type ConversationPanelProps = {
   selectedChat?: LocalChat;
@@ -11,11 +13,12 @@ type ConversationPanelProps = {
   knownUsersByAddress: ReadonlyMap<string, KnownUser>;
   ownerAddress?: string;
   appChainName: string;
+  ipfsStatus: LocalIpfsStatus;
   messageText: string;
   busy: boolean;
   messageScrollerRef: RefObject<HTMLDivElement | null>;
   onMessageTextChange: (value: string) => void;
-  onSendMessage: () => Promise<void>;
+  onSendMessage: (attachmentFiles?: File[]) => Promise<void>;
 };
 
 function userLabel(
@@ -63,12 +66,43 @@ export function ConversationPanel({
   selectedMessages,
   knownUsersByAddress,
   ownerAddress,
+  ipfsStatus,
   messageText,
   busy,
   messageScrollerRef,
   onMessageTextChange,
   onSendMessage,
 }: ConversationPanelProps) {
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const ipfsConnected = ipfsStatus.state === "connected";
+
+  useEffect(() => {
+    if (!ipfsConnected && attachmentFiles.length > 0) {
+      setAttachmentFiles([]);
+    }
+  }, [attachmentFiles.length, ipfsConnected]);
+
+
+
+  function addAttachmentFiles(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setAttachmentFiles((current) => [...current, ...Array.from(files)]);
+  }
+
+  function removeAttachmentFile(indexToRemove: number) {
+    setAttachmentFiles((current) =>
+      current.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+  async function sendCurrentMessage() {
+    await onSendMessage(attachmentFiles);
+    setAttachmentFiles([]);
+  }
+
   return (
     <section className="conversationPanel">
       {selectedChat ? (
@@ -171,9 +205,10 @@ export function ConversationPanel({
 
           <form
             className="composer"
+            data-ipfs-connected={ipfsConnected ? "true" : "false"}
             onSubmit={(event) => {
               event.preventDefault();
-              void onSendMessage();
+              void sendCurrentMessage();
             }}
           >
             <textarea
@@ -183,12 +218,70 @@ export function ConversationPanel({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  void onSendMessage();
+                  void sendCurrentMessage();
                 }
               }}
             />
 
-            <button disabled={busy || !messageText.trim()}>Send</button>
+            {attachmentFiles.length > 0 && (
+              <div className="composerAttachmentDrafts">
+                {attachmentFiles.map((file, index) => (
+                  <div
+                    className="composerAttachmentDraft"
+                    key={`${file.name}:${file.size}:${index}`}
+                  >
+                    <div>
+                      <strong>{file.name || "attachment"}</strong>
+                      <span>
+                        {(file.type || "application/octet-stream")} ·{" "}
+                        {formatFileSize(file.size)}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeAttachmentFile(index)}
+                      disabled={busy}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="composerFooter">
+              {ipfsConnected ? (
+                <label className="attachButton">
+                  Attach
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      addAttachmentFiles(event.currentTarget.files);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  className="attachButton disabled"
+                  disabled
+                  title="Connect IPFS to send files"
+                >
+                  Attach
+                </button>
+              )}
+
+              <button
+                disabled={
+                  busy || (!messageText.trim() && attachmentFiles.length === 0)
+                }
+              >
+                Send
+              </button>
+            </div>
           </form>
         </>
       ) : (

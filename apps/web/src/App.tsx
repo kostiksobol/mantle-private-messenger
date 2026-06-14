@@ -223,6 +223,7 @@ export default function App() {
         knownUsersByAddress={knownUsersByAddress}
         ownerAddress={ownerAddress}
         appChainName={appChain.name}
+        ipfsStatus={ipfsStatus}
         messageText={messageText}
         busy={busy}
         messageScrollerRef={messageScrollerRef}
