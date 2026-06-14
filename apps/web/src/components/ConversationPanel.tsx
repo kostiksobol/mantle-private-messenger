@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import type { RefObject } from "react";
 
-import { normalizeAddress } from "../lib/db";
+import { db, normalizeAddress } from "../lib/db";
 import { formatTime, shortAddress } from "./format";
+import { AttachmentCard } from "./AttachmentCard";
 import type { ChatMember, KnownUser, LocalChat, LocalMessage } from "./types";
 import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
 
@@ -75,6 +77,23 @@ export function ConversationPanel({
 }: ConversationPanelProps) {
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const ipfsConnected = ipfsStatus.state === "connected";
+
+  const cachedAttachmentFiles = useLiveQuery(
+    async () => {
+      if (!selectedChat || !ownerAddress) {
+        return [];
+      }
+
+      return db.attachmentFiles
+        .where("ownerAddress")
+        .equals(normalizeAddress(ownerAddress))
+        .filter((file) => file.chatId === selectedChat.chatId)
+        .toArray();
+    },
+    [ownerAddress, selectedChat?.chatId],
+    []
+  ) ?? [];
+
 
   useEffect(() => {
     if (!ipfsConnected && attachmentFiles.length > 0) {
@@ -173,27 +192,21 @@ export function ConversationPanel({
 
                     <div className="messageMeta">
                       <span>{formatTime(message.timestamp)}</span>
-                      <span>#{message.sourceMessageIndex}</span>
                     </div>
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="attachmentList">
                         {message.attachments.map((attachment) => (
-                          <a
-                            className="attachmentCard"
-                            href={attachment.url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <AttachmentCard
+                            attachment={attachment}
+                            cachedFile={cachedAttachmentFiles.find(
+                              (file) => file.url === attachment.url
+                            )}
+                            ownerAddress={ownerAddress}
+                            chatId={selectedChat.chatId}
+                            chatKey={selectedChat.chatKey}
+                            ipfsConnected={ipfsConnected}
                             key={`${message.id ?? message.sourceMessageIndex}:${attachment.url}`}
-                          >
-                            <div className="attachmentIcon">↗</div>
-                            <div className="attachmentInfo">
-                              <strong>{attachment.name}</strong>
-                              <span>
-                                {attachment.mime} · {formatFileSize(attachment.size)}
-                              </span>
-                              <small>IPFS attachment</small>
-                            </div>
-                          </a>
+                          />
                         ))}
                       </div>
                     )}

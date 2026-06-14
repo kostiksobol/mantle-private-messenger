@@ -10,6 +10,10 @@ import {
 import { rsaEncrypt } from "../lib/crypto/rsa";
 import { encryptFileBlob } from "../lib/ipfs/fileCrypto";
 import { uploadBlobToLocalIpfs } from "../lib/ipfs/localIpfs";
+import {
+  MAX_CACHED_ATTACHMENT_SIZE_BYTES,
+  putCachedAttachmentFile,
+} from "../lib/ipfs/attachmentCache";
 import { db, normalizeAddress } from "../lib/db";
 import { ensureRsaKeyPair, loadRsaKeyPair } from "../lib/localKeys";
 import {
@@ -393,7 +397,19 @@ export function useMessengerActions({
 
       for (const file of files) {
         addActivity(`upload file: ${file.name || "attachment"}`);
-        attachments.push(await uploadFileAttachment(selectedChat.chatKey, file));
+
+        const attachment = await uploadFileAttachment(selectedChat.chatKey, file);
+
+        attachments.push(attachment);
+
+        if (ownerAddress && file.size <= MAX_CACHED_ATTACHMENT_SIZE_BYTES) {
+          await putCachedAttachmentFile({
+            ownerAddress,
+            chatId: selectedChat.chatId,
+            attachment,
+            blob: file,
+          });
+        }
       }
 
       const encrypted = await aesEncrypt(

@@ -2199,3 +2199,126 @@ textarea:focus {
   cursor: not-allowed;
   opacity: 0.45;
 }
+
+.attachmentCard {
+  color: inherit;
+}
+
+.attachmentCard.cached {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.attachmentPreviewImage,
+.attachmentPreviewVideo {
+  display: block;
+  width: min(320px, 100%);
+  max-height: 280px;
+  margin-top: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.35);
+  object-fit: contain;
+}
+
+.attachmentActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.attachmentActions button {
+  min-height: 30px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.attachmentActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.attachmentActions a,
+.attachmentDownloadLink {
+  color: #bfdbfe;
+  font-size: 12px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.attachmentActions a:hover,
+.attachmentDownloadLink:hover {
+  text-decoration: underline;
+}
+
+.attachmentError {
+  color: #fecaca !important;
+  white-space: normal !important;
+}
+
+.attachmentUnknownFile {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  color: var(--text-muted);
+  background: rgba(2, 6, 23, 0.22);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.attachmentActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.attachmentActions a {
+  display: inline-grid;
+  place-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #bfdbfe;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.attachmentActions a:hover {
+  background: rgba(59, 130, 246, 0.16);
+  text-decoration: none;
+}
+
+.attachmentActions button {
+  display: inline-grid;
+  place-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.attachmentActions button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.attachmentActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

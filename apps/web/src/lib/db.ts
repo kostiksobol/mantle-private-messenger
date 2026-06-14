@@ -86,17 +86,29 @@ export type LocalMessage = {
   attachments?: LocalMessageAttachment[];
 };
 
+export type LocalAttachmentFile = {
+  id?: number;
+  ownerAddress: string;
+  chatId: string;
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+  blob: Blob;
+};
+
 class MessengerDatabase extends Dexie {
   selfProfiles!: Table<SelfProfile, number>;
   knownUsers!: Table<KnownUser, number>;
   chats!: Table<LocalChat, number>;
   chatMembers!: Table<ChatMember, number>;
   messages!: Table<LocalMessage, number>;
+  attachmentFiles!: Table<LocalAttachmentFile, number>;
 
   constructor() {
     super(databaseName);
 
-    this.version(2).stores({
+    this.version(4).stores({
       selfProfiles:
         "++id, &ownerAddress, userContract",
 
@@ -111,6 +123,9 @@ class MessengerDatabase extends Dexie {
 
       messages:
         "++id, ownerAddress, chatId, authorAddress, authorUserContract, timestamp, [ownerAddress+chatId], &[ownerAddress+chatId+authorUserContract+sourceMessageIndex]",
+
+      attachmentFiles:
+        "++id, ownerAddress, chatId, url, [ownerAddress+chatId+url]",
     });
   }
 }
