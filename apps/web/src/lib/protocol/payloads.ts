@@ -18,6 +18,7 @@ export type MessageAttachmentPayload = {
   name: string;
   mime: string;
   size: number;
+  iv: string;
   encryptedSize?: number;
 };
 
@@ -65,12 +66,13 @@ function parseAttachments(value: unknown): MessageAttachmentPayload[] | undefine
   for (const item of value) {
     if (!isRecord(item)) return undefined;
 
-    const { url, name, mime, size, encryptedSize } = item;
+    const { url, name, mime, size, iv, encryptedSize } = item;
 
     if (!isString(url) || !url) return undefined;
     if (!isString(name) || !name) return undefined;
     if (!isString(mime) || !mime) return undefined;
     if (!isNumber(size) || size < 0) return undefined;
+    if (!isString(iv) || !iv) return undefined;
 
     if (
       encryptedSize !== undefined &&
@@ -84,6 +86,7 @@ function parseAttachments(value: unknown): MessageAttachmentPayload[] | undefine
       name,
       mime,
       size,
+      iv,
       ...(encryptedSize !== undefined ? { encryptedSize } : {}),
     });
   }

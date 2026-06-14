@@ -68,6 +68,7 @@ export type LocalMessageAttachment = {
   name: string;
   mime: string;
   size: number;
+  iv: string;
   encryptedSize?: number;
 };
 
