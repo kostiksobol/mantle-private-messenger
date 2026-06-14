@@ -127,6 +127,7 @@ export function AttachmentCard({
 
   useEffect(() => {
     setLocalCachedFile(undefined);
+    setObjectUrl(undefined);
     setAttemptedAutoCache(false);
     setError(undefined);
     setLoadingCache(false);
@@ -138,6 +139,9 @@ export function AttachmentCard({
       setObjectUrl(undefined);
       return;
     }
+
+    setLoadingCache(false);
+    setError(undefined);
 
     const nextObjectUrl = URL.createObjectURL(activeCachedFile.blob);
     setObjectUrl(nextObjectUrl);
@@ -180,13 +184,12 @@ export function AttachmentCard({
 
         if (!cancelled) {
           setLocalCachedFile(nextCachedFile);
+          setLoadingCache(false);
+          setError(undefined);
         }
       } catch (caughtError) {
         if (!cancelled) {
           setError(errorMessage(caughtError));
-        }
-      } finally {
-        if (!cancelled) {
           setLoadingCache(false);
         }
       }
@@ -232,26 +235,23 @@ export function AttachmentCard({
     }
   }
 
-  const showStatus =
-    error ||
-    loadingCache ||
-    downloading ||
-    (!isCached && !ipfsConnected) ||
-    (!isCached && tooLargeToCache && ipfsConnected);
+  const hasDecryptedFile = objectUrl !== undefined;
 
-  const statusText = error
-    ? error
-    : loadingCache
-      ? "Decrypting file..."
+  const statusText =
+    error && !hasDecryptedFile
+      ? error
       : downloading
         ? "Preparing download..."
-        : !isCached && !ipfsConnected
-          ? "Connect IPFS to receive this file."
-          : !isCached && tooLargeToCache && ipfsConnected
-            ? "Large file. It will not be stored locally."
-            : "";
+        : loadingCache && !hasDecryptedFile
+          ? "Decrypting file..."
+          : !isCached && !ipfsConnected
+            ? "Connect IPFS to receive this file."
+            : !isCached && tooLargeToCache && ipfsConnected
+              ? "Large file. It will not be stored locally."
+              : "";
 
-  const showManualDownload = !isCached && ipfsConnected && !loadingCache;
+  const showManualDownload =
+    !hasDecryptedFile && ipfsConnected && !loadingCache;
 
   return (
     <div className={isCached ? "attachmentCard cached" : "attachmentCard"}>
@@ -265,8 +265,8 @@ export function AttachmentCard({
           {formatFileSize(attachment.size)}
         </span>
 
-        {showStatus && (
-          <small className={error ? "attachmentError" : undefined}>
+        {statusText && (
+          <small className={error && !hasDecryptedFile ? "attachmentError" : undefined}>
             {statusText}
           </small>
         )}
