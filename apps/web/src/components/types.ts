@@ -39,6 +39,8 @@ export type ChatMember = {
   cursor: number;
 };
 
+export type LocalMessageEvent = "Message" | "ChatCreation" | "Invitation";
+
 export type LocalMessage = {
   id?: number;
   ownerAddress: string;
@@ -48,6 +50,10 @@ export type LocalMessage = {
   sourceMessageIndex: number;
   content: string;
   timestamp: number;
+
+  event?: LocalMessageEvent;
+  invitedAddress?: string;
+  invitedByAddress?: string;
 };
 
 export type ChatWithPreview = {

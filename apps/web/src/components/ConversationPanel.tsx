@@ -18,6 +18,38 @@ type ConversationPanelProps = {
   onSendMessage: () => Promise<void>;
 };
 
+function userLabel(
+  address: string | undefined,
+  knownUsersByAddress: ReadonlyMap<string, KnownUser>
+) {
+  if (!address) {
+    return "Unknown user";
+  }
+
+  const user = knownUsersByAddress.get(normalizeAddress(address));
+
+  return user?.name || user?.login || shortAddress(address);
+}
+
+function systemMessageText(
+  message: LocalMessage,
+  selectedChat: LocalChat,
+  knownUsersByAddress: ReadonlyMap<string, KnownUser>
+) {
+  if (message.event === "ChatCreation") {
+    return message.content || `Chat created: ${selectedChat.name}`;
+  }
+
+  if (message.event === "Invitation") {
+    const invited = userLabel(message.invitedAddress, knownUsersByAddress);
+    const invitedBy = userLabel(message.invitedByAddress, knownUsersByAddress);
+
+    return `${invitedBy} invited ${invited}`;
+  }
+
+  return message.content;
+}
+
 export function ConversationPanel({
   selectedChat,
   selectedMembers,
@@ -54,6 +86,28 @@ export function ConversationPanel({
               </div>
             ) : (
               selectedMessages.map((message) => {
+                const key =
+                  message.id ??
+                  `${message.authorUserContract}:${message.sourceMessageIndex}`;
+
+                const event = message.event ?? "Message";
+
+                if (event !== "Message") {
+                  return (
+                    <div key={key} className="systemEvent">
+                      <span className="systemEventLabel">{event}</span>
+                      <span>
+                        {systemMessageText(
+                          message,
+                          selectedChat,
+                          knownUsersByAddress
+                        )}
+                      </span>
+                      <time>{formatTime(message.timestamp)}</time>
+                    </div>
+                  );
+                }
+
                 const isMine =
                   ownerAddress !== undefined &&
                   normalizeAddress(message.authorAddress) === ownerAddress;
@@ -66,10 +120,6 @@ export function ConversationPanel({
                   author?.name ||
                   author?.login ||
                   shortAddress(message.authorAddress);
-
-                const key =
-                  message.id ??
-                  `${message.authorUserContract}:${message.sourceMessageIndex}`;
 
                 return (
                   <article

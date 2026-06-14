@@ -59,6 +59,8 @@ export type ChatMember = {
   cursor: number;
 };
 
+export type LocalMessageEvent = "Message" | "ChatCreation" | "Invitation";
+
 export type LocalMessage = {
   id?: number;
 
@@ -72,6 +74,9 @@ export type LocalMessage = {
 
   content: string;
   timestamp: number;
+  event?: LocalMessageEvent;
+  invitedAddress?: string;
+  invitedByAddress?: string;
 };
 
 class MessengerDatabase extends Dexie {

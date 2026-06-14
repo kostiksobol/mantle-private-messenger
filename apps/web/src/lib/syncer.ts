@@ -487,11 +487,35 @@ class BlockchainSyncer {
         name: payload.name,
         chatKey: chat.chatKey,
       });
+
+      await this.putMessageIfNew({
+        ownerAddress: this.ownerAddress,
+        chatId: chat.chatId,
+        authorAddress: input.member.userAddress,
+        authorUserContract: input.member.userContract,
+        sourceMessageIndex: input.sourceMessageIndex,
+        content: `Chat created: ${payload.name}`,
+        timestamp: Number(input.message.timestamp),
+        event: "ChatCreation",
+      });
     }
 
     if (payload.event === "Invitation") {
       await this.addUserToChat(chat, payload.invited);
       await this.addUserToChat(chat, payload.invitedBy);
+
+      await this.putMessageIfNew({
+        ownerAddress: this.ownerAddress,
+        chatId: chat.chatId,
+        authorAddress: input.member.userAddress,
+        authorUserContract: input.member.userContract,
+        sourceMessageIndex: input.sourceMessageIndex,
+        content: "Invitation",
+        timestamp: Number(input.message.timestamp),
+        event: "Invitation",
+        invitedAddress: normalizeAddress(payload.invited),
+        invitedByAddress: normalizeAddress(payload.invitedBy),
+      });
     }
 
     if (payload.event === "Message") {
@@ -503,6 +527,7 @@ class BlockchainSyncer {
         sourceMessageIndex: input.sourceMessageIndex,
         content: payload.text,
         timestamp: Number(input.message.timestamp),
+        event: "Message",
       });
     }
 
@@ -617,6 +642,9 @@ class BlockchainSyncer {
     sourceMessageIndex: number;
     content: string;
     timestamp: number;
+    event?: "Message" | "ChatCreation" | "Invitation";
+    invitedAddress?: string;
+    invitedByAddress?: string;
   }) {
     const existing = await db.messages
       .where("[ownerAddress+chatId+authorUserContract+sourceMessageIndex]")
@@ -640,6 +668,13 @@ class BlockchainSyncer {
       sourceMessageIndex: input.sourceMessageIndex,
       content: input.content,
       timestamp: input.timestamp,
+      event: input.event,
+      invitedAddress: input.invitedAddress
+        ? asAddress(input.invitedAddress)
+        : undefined,
+      invitedByAddress: input.invitedByAddress
+        ? asAddress(input.invitedByAddress)
+        : undefined,
     });
   }
 
