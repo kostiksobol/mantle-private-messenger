@@ -337,6 +337,7 @@ class BlockchainSyncer {
       chatId,
       name: "Unnamed chat",
       chatKey: payload.chatKey,
+      invitedByAddress: asAddress(payload.inviter),
     });
 
     const self = await db.selfProfiles
@@ -504,6 +505,10 @@ class BlockchainSyncer {
       await this.addUserToChat(chat, payload.invited);
       await this.addUserToChat(chat, payload.invitedBy);
 
+      if (asAddress(payload.invited) === this.ownerAddress) {
+        await this.setChatInvitedBy(chat, input.member.userAddress);
+      }
+
       await this.putMessageIfNew({
         ownerAddress: this.ownerAddress,
         chatId: chat.chatId,
@@ -605,6 +610,25 @@ class BlockchainSyncer {
         ? existing.name
         : chat.name,
       chatKey: chat.chatKey,
+      invitedByAddress: chat.invitedByAddress
+        ? asAddress(chat.invitedByAddress)
+        : existing?.invitedByAddress,
+    });
+  }
+
+  private async setChatInvitedBy(chat: LocalChat, invitedByAddress: string) {
+    const existing = await db.chats
+      .where("[ownerAddress+chatId]")
+      .equals([this.ownerAddress, chat.chatId])
+      .first();
+
+    if (!existing || existing.invitedByAddress) {
+      return;
+    }
+
+    await db.chats.put({
+      ...existing,
+      invitedByAddress: asAddress(invitedByAddress),
     });
   }
 

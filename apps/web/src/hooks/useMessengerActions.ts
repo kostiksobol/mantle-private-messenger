@@ -76,6 +76,40 @@ function isZeroAddress(address: string) {
   return normalizeAddress(address) === ZERO_ADDRESS;
 }
 
+async function resolveMyInviterAddress(args: {
+  ownerAddress: Address;
+  selectedChat: LocalChat;
+}) {
+  if (args.selectedChat.invitedByAddress) {
+    return toAddress(args.selectedChat.invitedByAddress);
+  }
+
+  const invitationToMe = await db.messages
+    .where("[ownerAddress+chatId]")
+    .equals([args.ownerAddress, args.selectedChat.chatId])
+    .filter((message) => {
+      return (
+        message.event === "Invitation" &&
+        message.invitedAddress !== undefined &&
+        normalizeAddress(message.invitedAddress) === args.ownerAddress
+      );
+    })
+    .first();
+
+  if (invitationToMe) {
+    const invitedBy = toAddress(invitationToMe.authorAddress);
+
+    await db.chats.put({
+      ...args.selectedChat,
+      invitedByAddress: invitedBy,
+    });
+
+    return invitedBy;
+  }
+
+  return args.ownerAddress;
+}
+
 export function useMessengerActions({
   ownerAddress,
   chainId,
@@ -424,12 +458,17 @@ export function useMessengerActions({
         throw new Error("User not found");
       }
 
+      const myInviterAddress = await resolveMyInviterAddress({
+        ownerAddress: wallet.ownerAddress,
+        selectedChat,
+      });
+
       const invitationEvent = await aesEncrypt(
         selectedChat.chatKey,
         encodePayload(
           createInvitationPayload({
             invited: toAddress(invitedUser.userAddress),
-            invitedBy: wallet.ownerAddress,
+            invitedBy: myInviterAddress,
           })
         )
       );

@@ -31,6 +31,14 @@ function userLabel(
   return user?.name || user?.login || shortAddress(address);
 }
 
+function sameAddress(left?: string, right?: string) {
+  if (!left || !right) {
+    return false;
+  }
+
+  return normalizeAddress(left) === normalizeAddress(right);
+}
+
 function systemMessageText(
   message: LocalMessage,
   selectedChat: LocalChat,
@@ -41,10 +49,18 @@ function systemMessageText(
   }
 
   if (message.event === "Invitation") {
+    const author = userLabel(message.authorAddress, knownUsersByAddress);
     const invited = userLabel(message.invitedAddress, knownUsersByAddress);
-    const invitedBy = userLabel(message.invitedByAddress, knownUsersByAddress);
+    const authorInviter = userLabel(
+      message.invitedByAddress,
+      knownUsersByAddress
+    );
 
-    return `${invitedBy} invited ${invited}`;
+    if (sameAddress(message.authorAddress, message.invitedByAddress)) {
+      return `${author} invited ${invited}. ${author} is the chat creator.`;
+    }
+
+    return `${author} invited ${invited}. ${author} was originally invited by ${authorInviter}.`;
   }
 
   return message.content;

@@ -28,6 +28,7 @@ export type LocalChat = {
   chatId: string;
   name: string;
   chatKey: string;
+  invitedByAddress?: string;
 };
 
 export type ChatMember = {

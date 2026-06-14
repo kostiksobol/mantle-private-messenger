@@ -36,6 +36,15 @@ export function DetailsPanel({
 
       {selectedChat ? (
         <>
+          <section className="myInviterBox">
+            <label>My inviter</label>
+            <div>
+              {selectedChat.invitedByAddress
+                ? shortAddress(selectedChat.invitedByAddress)
+                : "Unknown yet"}
+            </div>
+          </section>
+
           <section className="inviteBox">
             <label>Invite user</label>
 
