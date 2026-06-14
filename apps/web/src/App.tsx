@@ -36,13 +36,31 @@ export default function App() {
   } = useAppWallet();
 
   const messageScrollerRef = useRef<HTMLDivElement | null>(null);
+  const previousOwnerAddressRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const previousOwnerAddress = previousOwnerAddressRef.current;
+
+    if (previousOwnerAddress === ownerAddress) {
+      return;
+    }
+
+    previousOwnerAddressRef.current = ownerAddress;
+
+    setLogin("");
+    setDisplayName("");
+    setChatName("");
+    setMessageText("");
+    setInviteTarget("");
+    setSelectedChatId("");
+  }, [ownerAddress]);
 
   const [showDebug, setShowDebug] = useState(false);
 
   const [login, setLogin] = useState("");
   const [displayName, setDisplayName] = useState("");
 
-  const [chatName, setChatName] = useState("New chat");
+  const [chatName, setChatName] = useState("");
   const [selectedChatId, setSelectedChatId] = useState("");
   const [messageText, setMessageText] = useState("");
   const [inviteTarget, setInviteTarget] = useState("");

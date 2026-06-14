@@ -20,24 +20,28 @@ export function IpfsStatusBox({
     <>
       <section className={connected ? "ipfsStatusBox connected" : "ipfsStatusBox"}>
         <div>
-          <label>Attachments</label>
-          <strong>{connected ? "IPFS connected" : "IPFS not connected"}</strong>
+          <label>Encrypted files</label>
+          <strong>{connected ? "IPFS ready" : "Text-only mode"}</strong>
           <p>
             {connected
-              ? "File attachments will be available."
-              : "You can read text messages. File previews are disabled."}
+              ? "You can send files and receive encrypted attachments."
+              : "Messages work normally. Connect IPFS to send and receive files."}
           </p>
         </div>
 
         <div className="ipfsStatusActions">
-          <button onClick={() => setOpen(true)}>Connect IPFS</button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Setup
+          </button>
+
           <button
+            type="button"
             disabled={checking}
             onClick={() => {
               void onCheck();
             }}
           >
-            {checking ? "Checking..." : "Check"}
+            {checking ? "Checking..." : connected ? "Recheck" : "Enable IPFS"}
           </button>
         </div>
       </section>
@@ -52,7 +56,7 @@ export function IpfsStatusBox({
             className="ipfsModal"
             role="dialog"
             aria-modal="true"
-            aria-label="Connect IPFS"
+            aria-label="Enable IPFS"
             onClick={(event) => event.stopPropagation()}
           >
             <header>
@@ -73,21 +77,19 @@ export function IpfsStatusBox({
               <li>Install IPFS Desktop or run Kubo locally.</li>
               <li>Start the local IPFS node.</li>
               <li>Install and enable IPFS Companion.</li>
-              <li>Click “Check IPFS connection”.</li>
+              <li>Click “Enable IPFS”.</li>
             </ol>
 
             <section className="ipfsHelpBlock">
-              <h3>Current check</h3>
+              <h3>Status</h3>
               <p>{status.message}</p>
-              <code>{status.apiUrl}</code>
             </section>
 
             <section className="ipfsHelpBlock">
               <h3>If browser access is blocked</h3>
               <p>
-                Your local node may be running, but the browser may not be
-                allowed to access the Kubo RPC API. In that case, allow this
-                app origin in Kubo CORS settings and restart IPFS Desktop/Kubo.
+                Allow this app origin in Kubo CORS settings and restart IPFS
+                Desktop/Kubo.
               </p>
 
               <pre>
@@ -99,12 +101,13 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
 
             <footer>
               <button
+                type="button"
                 onClick={() => {
                   void onCheck();
                 }}
                 disabled={checking}
               >
-                {checking ? "Checking..." : "Check IPFS connection"}
+                {checking ? "Checking..." : "Enable IPFS"}
               </button>
             </footer>
           </div>

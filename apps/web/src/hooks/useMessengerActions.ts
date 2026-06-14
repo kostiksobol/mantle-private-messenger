@@ -9,7 +9,7 @@ import {
 } from "../lib/crypto/hmac";
 import { rsaEncrypt } from "../lib/crypto/rsa";
 import { encryptFileBlob } from "../lib/ipfs/fileCrypto";
-import { uploadBlobToLocalIpfs } from "../lib/ipfs/localIpfs";
+import { checkLocalIpfs, uploadBlobToLocalIpfs } from "../lib/ipfs/localIpfs";
 import {
   MAX_CACHED_ATTACHMENT_SIZE_BYTES,
   putCachedAttachmentFile,
@@ -360,7 +360,7 @@ export function useMessengerActions({
         await wait(recordHash);
       }
 
-      onChatNameChange("New chat");
+      onChatNameChange("");
       onSelectedChatIdChange(chatId);
       setSyncNonce((value) => value + 1);
     });
@@ -391,6 +391,14 @@ export function useMessengerActions({
 
       if (!text && files.length === 0) {
         throw new Error("Message is empty");
+      }
+
+      if (files.length > 0) {
+        const ipfsStatus = await checkLocalIpfs();
+
+        if (ipfsStatus.state !== "connected") {
+          throw new Error("Connect IPFS before sending files");
+        }
       }
 
       const attachments: MessageAttachmentPayload[] = [];

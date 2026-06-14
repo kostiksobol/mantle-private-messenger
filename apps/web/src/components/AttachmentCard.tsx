@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   MAX_CACHED_ATTACHMENT_SIZE_BYTES,
@@ -19,6 +19,9 @@ type AttachmentCardProps = {
   chatKey: string;
   ipfsConnected: boolean;
 };
+
+const CACHE_OPERATION_TIMEOUT_MS = 120_000;
+const DOWNLOAD_OPERATION_TIMEOUT_MS = 30 * 60_000;
 
 function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -58,6 +61,42 @@ function triggerDownload(blob: Blob, fileName: string) {
   }, 30_000);
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutId: number | undefined;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function decryptAttachmentToBlob(
+  attachment: LocalMessageAttachment,
+  chatKey: string
+) {
+  const encryptedBlob = await downloadIpfsUrl(attachment.url);
+
+  return decryptFileBlob(
+    chatKey,
+    encryptedBlob,
+    attachment.iv,
+    attachment.mime || "application/octet-stream"
+  );
+}
+
 export function AttachmentCard({
   attachment,
   cachedFile,
@@ -66,14 +105,18 @@ export function AttachmentCard({
   chatKey,
   ipfsConnected,
 }: AttachmentCardProps) {
+  const [localCachedFile, setLocalCachedFile] = useState<LocalAttachmentFile>();
   const [objectUrl, setObjectUrl] = useState<string>();
-  const [loading, setLoading] = useState(false);
+  const [loadingCache, setLoadingCache] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [attemptedAutoLoad, setAttemptedAutoLoad] = useState(false);
+  const [attemptedAutoCache, setAttemptedAutoCache] = useState(false);
   const [error, setError] = useState<string>();
 
-  const mime = cachedFile?.mime || attachment.mime || "application/octet-stream";
-  const isCached = cachedFile !== undefined;
+  const activeCachedFile = cachedFile ?? localCachedFile;
+  const isCached = activeCachedFile !== undefined;
+
+  const mime =
+    activeCachedFile?.mime || attachment.mime || "application/octet-stream";
 
   const declaredSize = Math.max(
     attachment.size,
@@ -82,51 +125,35 @@ export function AttachmentCard({
 
   const tooLargeToCache = declaredSize > MAX_CACHED_ATTACHMENT_SIZE_BYTES;
 
-  const statusText = useMemo(() => {
-    if (isCached) {
-      return "Stored locally";
-    }
-
-    if (!ipfsConnected) {
-      return "IPFS is not connected. File content is unavailable.";
-    }
-
-    if (tooLargeToCache) {
-      return "Large file. It will not be stored locally.";
-    }
-
-    if (loading) {
-      return "Loading encrypted file from IPFS...";
-    }
-
-    if (error) {
-      return error;
-    }
-
-    return "Preparing file...";
-  }, [error, ipfsConnected, isCached, loading, tooLargeToCache]);
+  useEffect(() => {
+    setLocalCachedFile(undefined);
+    setAttemptedAutoCache(false);
+    setError(undefined);
+    setLoadingCache(false);
+    setDownloading(false);
+  }, [attachment.url]);
 
   useEffect(() => {
-    if (!cachedFile) {
+    if (!activeCachedFile) {
       setObjectUrl(undefined);
       return;
     }
 
-    const nextObjectUrl = URL.createObjectURL(cachedFile.blob);
+    const nextObjectUrl = URL.createObjectURL(activeCachedFile.blob);
     setObjectUrl(nextObjectUrl);
 
     return () => {
       URL.revokeObjectURL(nextObjectUrl);
     };
-  }, [cachedFile]);
+  }, [activeCachedFile]);
 
   useEffect(() => {
     if (
       !ownerAddress ||
       !ipfsConnected ||
       isCached ||
-      loading ||
-      attemptedAutoLoad ||
+      loadingCache ||
+      attemptedAutoCache ||
       tooLargeToCache
     ) {
       return;
@@ -134,42 +161,50 @@ export function AttachmentCard({
 
     let cancelled = false;
 
-    async function autoLoad() {
-      setAttemptedAutoLoad(true);
-      setLoading(true);
+    async function autoCache() {
+      setAttemptedAutoCache(true);
+      setLoadingCache(true);
       setError(undefined);
 
       try {
-        await cacheAttachmentFromIpfs({
-          ownerAddress,
-          chatId,
-          chatKey,
-          attachment,
-        });
+        const nextCachedFile = await withTimeout(
+          cacheAttachmentFromIpfs({
+            ownerAddress,
+            chatId,
+            chatKey,
+            attachment,
+          }),
+          CACHE_OPERATION_TIMEOUT_MS,
+          "File decrypt timed out"
+        );
+
+        if (!cancelled) {
+          setLocalCachedFile(nextCachedFile);
+        }
       } catch (caughtError) {
         if (!cancelled) {
           setError(errorMessage(caughtError));
         }
       } finally {
         if (!cancelled) {
-          setLoading(false);
+          setLoadingCache(false);
         }
       }
     }
 
-    void autoLoad();
+    void autoCache();
 
     return () => {
       cancelled = true;
     };
   }, [
-    attemptedAutoLoad,
+    attemptedAutoCache,
     attachment,
     chatId,
     chatKey,
     ipfsConnected,
     isCached,
-    loading,
+    loadingCache,
     ownerAddress,
     tooLargeToCache,
   ]);
@@ -183,12 +218,10 @@ export function AttachmentCard({
     setError(undefined);
 
     try {
-      const encryptedBlob = await downloadIpfsUrl(attachment.url);
-      const decryptedBlob = await decryptFileBlob(
-        chatKey,
-        encryptedBlob,
-        attachment.iv,
-        attachment.mime
+      const decryptedBlob = await withTimeout(
+        decryptAttachmentToBlob(attachment, chatKey),
+        DOWNLOAD_OPERATION_TIMEOUT_MS,
+        "File download timed out"
       );
 
       triggerDownload(decryptedBlob, attachment.name || "attachment");
@@ -198,6 +231,27 @@ export function AttachmentCard({
       setDownloading(false);
     }
   }
+
+  const showStatus =
+    error ||
+    loadingCache ||
+    downloading ||
+    (!isCached && !ipfsConnected) ||
+    (!isCached && tooLargeToCache && ipfsConnected);
+
+  const statusText = error
+    ? error
+    : loadingCache
+      ? "Decrypting file..."
+      : downloading
+        ? "Preparing download..."
+        : !isCached && !ipfsConnected
+          ? "Connect IPFS to receive this file."
+          : !isCached && tooLargeToCache && ipfsConnected
+            ? "Large file. It will not be stored locally."
+            : "";
+
+  const showManualDownload = !isCached && ipfsConnected && !loadingCache;
 
   return (
     <div className={isCached ? "attachmentCard cached" : "attachmentCard"}>
@@ -211,13 +265,11 @@ export function AttachmentCard({
           {formatFileSize(attachment.size)}
         </span>
 
-        {attachment.encryptedSize !== undefined && (
-          <small>Encrypted: {formatFileSize(attachment.encryptedSize)}</small>
+        {showStatus && (
+          <small className={error ? "attachmentError" : undefined}>
+            {statusText}
+          </small>
         )}
-
-        <small className={error ? "attachmentError" : undefined}>
-          {statusText}
-        </small>
 
         {objectUrl && isImage(mime) && (
           <img
@@ -238,7 +290,7 @@ export function AttachmentCard({
         {objectUrl && (
           <div className="attachmentActions">
             <a href={objectUrl} target="_blank" rel="noreferrer">
-              Open in new tab
+              Open
             </a>
 
             <a href={objectUrl} download={attachment.name || "attachment"}>
@@ -247,11 +299,11 @@ export function AttachmentCard({
           </div>
         )}
 
-        {!isCached && tooLargeToCache && (
+        {showManualDownload && (
           <div className="attachmentActions">
             <button
               type="button"
-              disabled={!ipfsConnected || downloading}
+              disabled={downloading}
               onClick={() => {
                 void downloadWithoutCaching();
               }}
