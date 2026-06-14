@@ -203,6 +203,7 @@ export default function App() {
         chatName={chatName}
         selectedChatId={selectedChatId}
         chatsWithPreview={chatsWithPreview}
+        knownUsersByAddress={knownUsersByAddress}
         busy={busy}
         showDebug={showDebug}
         onChatNameChange={setChatName}

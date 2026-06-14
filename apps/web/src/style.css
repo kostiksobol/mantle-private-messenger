@@ -610,7 +610,6 @@ textarea:focus {
   grid-template-rows:
     auto
     auto
-    auto
     minmax(180px, 1fr)
     minmax(190px, 0.8fr);
   border-left: 1px solid var(--line);
@@ -999,4 +998,250 @@ textarea:focus {
   margin-top: 8px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.cleanDetailsPanel {
+  grid-template-rows:
+    minmax(220px, 1fr)
+    auto
+    minmax(160px, 0.65fr);
+}
+
+.primaryMembersBox {
+  border-bottom: 1px solid var(--line);
+}
+
+.sectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 18px 10px;
+}
+
+.sectionTitleRow h3 {
+  margin: 0;
+}
+
+.sectionTitleRow p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.memberMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.memberNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memberNameRow .memberName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.creatorBadge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.13);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.inviteDisclosure {
+  border-bottom: 1px solid var(--line);
+}
+
+.inviteDisclosure summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 16px 18px;
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inviteDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.inviteDisclosure summary::after {
+  content: "+";
+  float: right;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.inviteDisclosure[open] summary::after {
+  content: "–";
+}
+
+.compactInviteBox {
+  border-bottom: 0;
+  padding-top: 0;
+}
+
+.compactMemberDetails {
+  border-top: 0;
+}
+
+.compactMemberDetails dd {
+  overflow-wrap: anywhere;
+}
+
+.systemEvent {
+  max-width: min(560px, 82%);
+  padding: 7px 12px;
+  gap: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.11);
+  border-color: rgba(148, 163, 184, 0.16);
+  color: var(--text-muted);
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.systemEventLabel {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  background: rgba(59, 130, 246, 0.16);
+  color: #bfdbfe;
+}
+
+.systemEvent time {
+  color: var(--text-muted);
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+.networkBadge {
+  display: none;
+}
+
+.sidebarActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.roundButton.active {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.chatToolbar {
+  padding: 14px 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chatSearchBox {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.chatSearchBox span {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+.chatSearchBox input {
+  min-width: 0;
+  height: 48px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.chatSearchBox input::placeholder {
+  color: var(--text-muted);
+}
+
+.newChatToggle {
+  width: 100%;
+  height: 46px;
+  margin-top: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 16px;
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+  font-size: 24px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.newChatToggle:hover,
+.newChatToggle.active {
+  background: rgba(59, 130, 246, 0.24);
+  border-color: rgba(96, 165, 250, 0.42);
+}
+
+.compactNewChatForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.compactNewChatForm input {
+  min-width: 0;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  font: inherit;
+  outline: 0;
+}
+
+.compactNewChatForm input::placeholder {
+  color: var(--text-muted);
+}
+
+.compactNewChatForm button {
+  height: 48px;
+  border: 0;
+  border-radius: 16px;
+  padding: 0 18px;
+  background: var(--accent);
+  color: white;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.compactNewChatForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chatPreview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

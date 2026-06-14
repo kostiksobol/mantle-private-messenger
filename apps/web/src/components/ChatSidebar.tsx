@@ -1,5 +1,8 @@
+import { useMemo, useState } from "react";
+
+import { normalizeAddress } from "../lib/db";
 import { formatTime, initials, shortAddress } from "./format";
-import type { ChatWithPreview, SelfProfile } from "./types";
+import type { ChatWithPreview, KnownUser, SelfProfile } from "./types";
 
 type ChatSidebarProps = {
   selfProfile: SelfProfile;
@@ -7,6 +10,7 @@ type ChatSidebarProps = {
   chatName: string;
   selectedChatId: string;
   chatsWithPreview: ChatWithPreview[];
+  knownUsersByAddress: ReadonlyMap<string, KnownUser>;
   busy: boolean;
   showDebug: boolean;
   onChatNameChange: (value: string) => void;
@@ -16,12 +20,50 @@ type ChatSidebarProps = {
   onDisconnect: () => void;
 };
 
+function userLabel(
+  address: string | undefined,
+  knownUsersByAddress: ReadonlyMap<string, KnownUser>
+) {
+  if (!address) {
+    return "Unknown";
+  }
+
+  const user = knownUsersByAddress.get(normalizeAddress(address));
+
+  return user?.name || user?.login || shortAddress(address);
+}
+
+function chatPreviewText(
+  item: ChatWithPreview,
+  knownUsersByAddress: ReadonlyMap<string, KnownUser>
+) {
+  const { lastMessage, membersCount } = item;
+
+  if (!lastMessage) {
+    return `${membersCount} member${membersCount === 1 ? "" : "s"}`;
+  }
+
+  if (lastMessage.event === "ChatCreation") {
+    return "Chat created";
+  }
+
+  if (lastMessage.event === "Invitation") {
+    const author = userLabel(lastMessage.authorAddress, knownUsersByAddress);
+    const invited = userLabel(lastMessage.invitedAddress, knownUsersByAddress);
+
+    return `${author} invited ${invited}`;
+  }
+
+  return lastMessage.content || "Message";
+}
+
 export function ChatSidebar({
   selfProfile,
   ownerAddress,
   chatName,
   selectedChatId,
   chatsWithPreview,
+  knownUsersByAddress,
   busy,
   showDebug,
   onChatNameChange,
@@ -30,6 +72,31 @@ export function ChatSidebar({
   onToggleDebug,
   onDisconnect,
 }: ChatSidebarProps) {
+  const [chatSearch, setChatSearch] = useState("");
+  const [showNewChat, setShowNewChat] = useState(false);
+
+  const filteredChats = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+
+    if (!query) {
+      return chatsWithPreview;
+    }
+
+    return chatsWithPreview.filter((item) => {
+      const preview = chatPreviewText(item, knownUsersByAddress);
+
+      return (
+        item.chat.name.toLowerCase().includes(query) ||
+        preview.toLowerCase().includes(query)
+      );
+    });
+  }, [chatSearch, chatsWithPreview, knownUsersByAddress]);
+
+  async function createChat() {
+    await onCreateChat();
+    setShowNewChat(false);
+  }
+
   return (
     <aside className="chatSidebar">
       <header className="sidebarHeader">
@@ -40,30 +107,61 @@ export function ChatSidebar({
           </div>
         </div>
 
-        <button
-          className="roundButton"
-          title="Disconnect"
-          onClick={onDisconnect}
-        >
-          ⎋
-        </button>
+        <div className="sidebarActions">
+          <button
+            className={showDebug ? "roundButton active" : "roundButton"}
+            title={showDebug ? "Hide dev tools" : "Show dev tools"}
+            onClick={onToggleDebug}
+          >
+            ⚙
+          </button>
+
+          <button
+            className="roundButton"
+            title="Disconnect"
+            onClick={onDisconnect}
+          >
+            ⎋
+          </button>
+        </div>
       </header>
 
-      <section className="newChatBox">
-        <input
-          placeholder="New chat name"
-          value={chatName}
-          onChange={(event) => onChatNameChange(event.target.value)}
-        />
+      <section className="chatToolbar">
+        <div className="chatSearchBox">
+          <span>⌕</span>
+          <input
+            placeholder="Search chats"
+            value={chatSearch}
+            onChange={(event) => setChatSearch(event.target.value)}
+          />
+        </div>
 
         <button
-          disabled={busy}
-          onClick={() => {
-            void onCreateChat();
-          }}
+          className={showNewChat ? "newChatToggle active" : "newChatToggle"}
+          title={showNewChat ? "Close new chat" : "New chat"}
+          onClick={() => setShowNewChat((value) => !value)}
         >
-          Create
+          +
         </button>
+
+        {showNewChat && (
+          <form
+            className="compactNewChatForm"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createChat();
+            }}
+          >
+            <input
+              placeholder="Chat name"
+              value={chatName}
+              onChange={(event) => onChatNameChange(event.target.value)}
+              autoFocus
+            />
+
+            <button disabled={busy}>Create</button>
+          </form>
+        )}
       </section>
 
       <nav className="chatList">
@@ -72,41 +170,43 @@ export function ChatSidebar({
             <strong>No chats yet</strong>
             <span>Create your first encrypted chat.</span>
           </div>
+        ) : filteredChats.length === 0 ? (
+          <div className="emptyState small">
+            <strong>No results</strong>
+            <span>Try another chat name or message preview.</span>
+          </div>
         ) : (
-          chatsWithPreview.map(({ chat, lastMessage, membersCount }) => (
-            <button
-              key={chat.chatId}
-              className={
-                chat.chatId === selectedChatId ? "chatItem active" : "chatItem"
-              }
-              onClick={() => onSelectChat(chat.chatId)}
-            >
-              <div className="avatar">{initials(chat.name)}</div>
+          filteredChats.map((item) => {
+            const { chat, lastMessage } = item;
+            const preview = chatPreviewText(item, knownUsersByAddress);
 
-              <div className="chatItemBody">
-                <div className="chatItemTop">
-                  <span>{chat.name}</span>
-                  <time>
-                    {lastMessage ? formatTime(lastMessage.timestamp) : ""}
-                  </time>
-                </div>
+            return (
+              <button
+                key={chat.chatId}
+                className={
+                  chat.chatId === selectedChatId
+                    ? "chatItem active"
+                    : "chatItem"
+                }
+                onClick={() => onSelectChat(chat.chatId)}
+              >
+                <div className="avatar">{initials(chat.name)}</div>
 
-                <div className="chatPreview">
-                  {lastMessage
-                    ? lastMessage.content
-                    : `${membersCount} member${membersCount === 1 ? "" : "s"}`}
+                <div className="chatItemBody">
+                  <div className="chatItemTop">
+                    <span>{chat.name}</span>
+                    <time>
+                      {lastMessage ? formatTime(lastMessage.timestamp) : ""}
+                    </time>
+                  </div>
+
+                  <div className="chatPreview">{preview}</div>
                 </div>
-              </div>
-            </button>
-          ))
+              </button>
+            );
+          })
         )}
       </nav>
-
-      <footer className="sidebarFooter">
-        <button className="ghostButton full" onClick={onToggleDebug}>
-          {showDebug ? "Hide debug" : "Show debug"}
-        </button>
-      </footer>
     </aside>
   );
 }
