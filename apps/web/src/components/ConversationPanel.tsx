@@ -56,7 +56,6 @@ export function ConversationPanel({
   selectedMessages,
   knownUsersByAddress,
   ownerAddress,
-  appChainName,
   messageText,
   busy,
   messageScrollerRef,
@@ -76,7 +75,6 @@ export function ConversationPanel({
               </p>
             </div>
 
-            <div className="networkBadge">{appChainName}</div>
           </header>
 
           <div ref={messageScrollerRef} className="messageScroller">

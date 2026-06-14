@@ -15,6 +15,10 @@ type DetailsPanelProps = {
   onSelectMemberAddress: (value: string) => void;
 };
 
+function memberLabel(user: KnownUser | undefined, fallbackAddress: string) {
+  return user?.name || user?.login || shortAddress(fallbackAddress);
+}
+
 export function DetailsPanel({
   selectedChat,
   inviteTarget,
@@ -28,47 +32,16 @@ export function DetailsPanel({
   onSelectMemberAddress,
 }: DetailsPanelProps) {
   return (
-    <aside className="detailsPanel">
-      <header className="detailsHeader">
-        <h2>Chat info</h2>
-        <p>{selectedChat?.name || "No chat selected"}</p>
-      </header>
-
+    <aside className="detailsPanel cleanDetailsPanel">
       {selectedChat ? (
         <>
-          <section className="creatorBox">
-            <label>Creator</label>
-            <div>{shortAddress(selectedChat.creatorAddress)}</div>
-            <small>
-              {selectedChat.creatorVerified
-                ? "Verified by ChatCreation"
-                : "Waiting for ChatCreation"}
-            </small>
-          </section>
-
-          <section className="inviteBox">
-            <label>Invite user</label>
-
-            <div className="inviteRow">
-              <input
-                placeholder="login or 0x address"
-                value={inviteTarget}
-                onChange={(event) => onInviteTargetChange(event.target.value)}
-              />
-
-              <button
-                disabled={busy || !inviteTarget.trim()}
-                onClick={() => {
-                  void onInvite();
-                }}
-              >
-                Invite
-              </button>
+          <section className="membersBox primaryMembersBox">
+            <div className="sectionTitleRow">
+              <div>
+                <h3>Members</h3>
+                <p>{selectedMembers.length} participants</p>
+              </div>
             </div>
-          </section>
-
-          <section className="membersBox">
-            <h3>Members</h3>
 
             <div className="memberList">
               {selectedMembers.map((member) => {
@@ -76,8 +49,10 @@ export function DetailsPanel({
                   normalizeAddress(member.userAddress)
                 );
 
-                const name =
-                  user?.name || user?.login || shortAddress(member.userAddress);
+                const name = memberLabel(user, member.userAddress);
+                const isCreator =
+                  normalizeAddress(member.userAddress) ===
+                  normalizeAddress(selectedChat.creatorAddress);
 
                 const active =
                   normalizeAddress(member.userAddress) ===
@@ -91,11 +66,16 @@ export function DetailsPanel({
                   >
                     <div className="avatar memberAvatar">{initials(name)}</div>
 
-                    <div>
-                      <div className="memberName">{name}</div>
+                    <div className="memberMain">
+                      <div className="memberNameRow">
+                        <span className="memberName">{name}</span>
+                        {isCreator && (
+                          <span className="creatorBadge">Creator</span>
+                        )}
+                      </div>
+
                       <div className="memberMeta">
-                        {shortAddress(member.userAddress)} · cursor{" "}
-                        {member.cursor}
+                        {shortAddress(member.userAddress)}
                       </div>
                     </div>
                   </button>
@@ -104,38 +84,55 @@ export function DetailsPanel({
             </div>
           </section>
 
-          <section className="memberDetails">
-            <h3>Participant details</h3>
+          <details className="inviteDisclosure">
+            <summary>Invite member</summary>
+
+            <section className="inviteBox compactInviteBox">
+              <label>Login or address</label>
+
+              <div className="inviteRow">
+                <input
+                  placeholder="login or 0x address"
+                  value={inviteTarget}
+                  onChange={(event) => onInviteTargetChange(event.target.value)}
+                />
+
+                <button
+                  disabled={busy || !inviteTarget.trim()}
+                  onClick={() => {
+                    void onInvite();
+                  }}
+                >
+                  Invite
+                </button>
+              </div>
+            </section>
+          </details>
+
+          <section className="memberDetails compactMemberDetails">
+            <h3>Participant</h3>
 
             {selectedMember ? (
               <dl>
-                <dt>Login</dt>
-                <dd>{selectedMember.login}</dd>
-
                 <dt>Name</dt>
-                <dd>{selectedMember.name}</dd>
+                <dd>{selectedMember.name || "—"}</dd>
+
+                <dt>Login</dt>
+                <dd>{selectedMember.login || "—"}</dd>
 
                 <dt>Address</dt>
-                <dd>{selectedMember.userAddress}</dd>
+                <dd>{shortAddress(selectedMember.userAddress)}</dd>
 
-                <dt>Contract</dt>
-                <dd>{selectedMember.userContract}</dd>
-
-                <dt>Kind</dt>
+                <dt>Type</dt>
                 <dd>{selectedMember.kind === 0 ? "Human" : "Agent"}</dd>
-
-                <dt>Metadata</dt>
-                <dd>{selectedMember.metadataURI || "—"}</dd>
               </dl>
             ) : selectedMemberAddress ? (
               <dl>
                 <dt>Address</dt>
-                <dd>{selectedMemberAddress}</dd>
+                <dd>{shortAddress(selectedMemberAddress)}</dd>
               </dl>
             ) : (
-              <p className="muted">
-                Select a participant to inspect profile data.
-              </p>
+              <p className="muted">Select a participant to see profile data.</p>
             )}
           </section>
         </>

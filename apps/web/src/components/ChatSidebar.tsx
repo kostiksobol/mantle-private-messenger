@@ -75,6 +75,10 @@ export function ChatSidebar({
   const [chatSearch, setChatSearch] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
 
+  const profileName = selfProfile.name || selfProfile.login;
+  const profileLogin = selfProfile.login;
+  const profileAddress = ownerAddress ?? "";
+
   const filteredChats = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
 
@@ -100,11 +104,33 @@ export function ChatSidebar({
   return (
     <aside className="chatSidebar">
       <header className="sidebarHeader">
-        <div>
+        <div className="sidebarIdentity">
           <div className="sidebarTitle">Chats</div>
-          <div className="sidebarSubtitle">
-            {selfProfile.login} · {shortAddress(ownerAddress)}
-          </div>
+
+          <details className="accountStrip">
+            <summary className="accountSummary">
+              <div className="accountSummaryText">
+                <span className="accountLabel">Account</span>
+                <strong>{profileName}</strong>
+              </div>
+
+              <span className="accountChevron">⌄</span>
+            </summary>
+
+            <div className="accountExpanded">
+              <div className="accountField">
+                <span>Login</span>
+                <strong>{profileLogin}</strong>
+              </div>
+
+              {profileAddress && (
+                <div className="accountField accountAddressField">
+                  <span>Address</span>
+                  <code title={profileAddress}>{profileAddress}</code>
+                </div>
+              )}
+            </div>
+          </details>
         </div>
 
         <div className="sidebarActions">
