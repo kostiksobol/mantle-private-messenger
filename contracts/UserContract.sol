@@ -8,6 +8,8 @@ contract UserContract {
         uint256 timestamp;
     }
 
+    event MessageAdded(uint256 indexed index, string tag);
+
     address public owner;
 
     Message[] private messages;
@@ -25,6 +27,8 @@ contract UserContract {
         string calldata encryptedContent,
         string calldata tag
     ) external onlyOwner {
+        uint256 index = messages.length;
+
         messages.push(
             Message({
                 encryptedContent: encryptedContent,
@@ -32,6 +36,8 @@ contract UserContract {
                 timestamp: block.timestamp
             })
         );
+
+        emit MessageAdded(index, tag);
     }
 
     function getLastMessages(

@@ -1,7 +1,29 @@
 import Dexie, { type Table } from "dexie";
 
-export type LocalProfile = {
-  walletAddress: string;
+const appNetwork = import.meta.env.VITE_APP_NETWORK || "anvil";
+const databaseName = `mantle-private-messenger:${appNetwork}`;
+
+export type SelfProfile = {
+  id?: number;
+
+  ownerAddress: string;
+
+  login: string;
+  name: string;
+  pubkey: string;
+  userContract: string;
+  kind: number;
+  metadataURI: string;
+
+  mainRecordsCursor: number;
+};
+
+export type KnownUser = {
+  id?: number;
+
+  ownerAddress: string;
+
+  userAddress: string;
   login: string;
   name: string;
   pubkey: string;
@@ -10,63 +32,73 @@ export type LocalProfile = {
   metadataURI: string;
 };
 
-export type LocalMessage = {
-  id: string;
+export type LocalChat = {
+  id?: number;
+
+  ownerAddress: string;
+
+  // invariant: chatId = deriveChatId(chatKey)
+  chatId: string;
+
+  name: string;
+  chatKey: string;
+};
+
+export type ChatMember = {
+  id?: number;
+
+  ownerAddress: string;
+
+  chatId: string;
+
+  userAddress: string;
   userContract: string;
-  messageIndex: number;
-  encryptedContent: string;
-  tag: string;
+
+  // how far this owner has scanned this user's UserContract
+  // for this exact chatId/chatKey
+  cursor: number;
+};
+
+export type LocalMessage = {
+  id?: number;
+
+  ownerAddress: string;
+
+  chatId: string;
+
+  authorAddress: string;
+  authorUserContract: string;
+  sourceMessageIndex: number;
+
+  content: string;
   timestamp: number;
 };
 
-export type LocalRecord = {
-  id: string;
-  mainConnector: string;
-  recordIndex: number;
-  encryptedRecord: string;
-};
-
-export type LocalKeyPair = {
-  walletAddress: string;
-  publicKey: string;
-  privateKey: string;
-  createdAt: number;
-};
-
-export type SyncState = {
-  key: string;
-  value: number;
-};
-
 class MessengerDatabase extends Dexie {
-  profiles!: Table<LocalProfile, string>;
-  messages!: Table<LocalMessage, string>;
-  records!: Table<LocalRecord, string>;
-  keyPairs!: Table<LocalKeyPair, string>;
-  syncState!: Table<SyncState, string>;
+  selfProfiles!: Table<SelfProfile, number>;
+  knownUsers!: Table<KnownUser, number>;
+  chats!: Table<LocalChat, number>;
+  chatMembers!: Table<ChatMember, number>;
+  messages!: Table<LocalMessage, number>;
 
   constructor() {
-    super("mantle-private-messenger");
-
-    this.version(1).stores({
-      profiles: "&walletAddress, userContract, login",
-      messages: "&id, userContract, [userContract+messageIndex], timestamp",
-      syncState: "&key",
-    });
+    super(databaseName);
 
     this.version(2).stores({
-      profiles: "&walletAddress, userContract, login",
-      messages: "&id, userContract, [userContract+messageIndex], timestamp",
-      records: "&id, recordIndex",
-      syncState: "&key",
-    });
+      selfProfiles:
+        "++id, &ownerAddress, userContract",
 
-    this.version(3).stores({
-      profiles: "&walletAddress, userContract, login",
-      messages: "&id, userContract, [userContract+messageIndex], timestamp",
-      records: "&id, mainConnector, [mainConnector+recordIndex], recordIndex",
-      keyPairs: "&walletAddress",
-      syncState: "&key",
+      knownUsers:
+        "++id, ownerAddress, userAddress, login, userContract, &[ownerAddress+userAddress]",
+
+      chats:
+        "++id, ownerAddress, chatId, &[ownerAddress+chatId]",
+
+      chatMembers:
+        "++id, ownerAddress, chatId, userAddress, userContract, [ownerAddress+chatId], &[ownerAddress+chatId+userAddress]",
+
+      messages:
+        "++id, ownerAddress, chatId, authorAddress, authorUserContract, timestamp, [ownerAddress+chatId], &[ownerAddress+chatId+authorUserContract+sourceMessageIndex]",
     });
   }
 }
@@ -77,10 +109,6 @@ export function normalizeAddress(address: string) {
   return address.toLowerCase();
 }
 
-export function messageCursorKey(userContract: string) {
-  return `messages:${normalizeAddress(userContract)}`;
-}
-
-export function mainConnectorRecordsCursorKey(mainConnector: string) {
-  return `records:${normalizeAddress(mainConnector)}`;
+export function makeOwnerAddress(walletAddress: string) {
+  return normalizeAddress(walletAddress);
 }

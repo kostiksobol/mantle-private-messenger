@@ -1,32 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { createWalletClient, custom, type Address } from "viem";
 import {
   useAccount,
   useConnect,
   useDisconnect,
   usePublicClient,
-  useReadContract,
-  useWriteContract,
-  useWaitForTransactionReceipt,
 } from "wagmi";
-import { useLiveQuery } from "dexie-react-hooks";
-import type { Address } from "viem";
+
+import "./style.css";
+
+import { aesEncrypt } from "./lib/crypto/aes";
+import {
+  deriveChatId,
+  generateChatKey,
+  generateMessageTag,
+} from "./lib/crypto/hmac";
+import { rsaEncrypt } from "./lib/crypto/rsa";
+import { db, normalizeAddress } from "./lib/db";
+import { ensureRsaKeyPair, loadRsaKeyPair } from "./lib/localKeys";
 import {
   MAIN_CONNECTOR_ADDRESS,
   ZERO_ADDRESS,
   mainConnectorAbi,
   userContractAbi,
 } from "./lib/contracts";
+import { appChain } from "./lib/wagmi";
+import { startBlockchainSyncer } from "./lib/syncer";
 import {
-  db,
-  mainConnectorRecordsCursorKey,
-  messageCursorKey,
-  normalizeAddress,
-  type LocalMessage,
-  type LocalRecord,
-} from "./lib/db";
-import { generateRsaKeyPair, rsaDecrypt, rsaEncrypt } from "./lib/crypto";
+  createChatCreationPayload,
+  createInvitationPayload,
+  createMainInvitationPayload,
+  createMessagePayload,
+  encodePayload,
+} from "./lib/protocol/payloads";
 
-type UserStruct = {
+type ChainUser = {
   userAddress: Address;
   login: string;
   name: string;
@@ -36,952 +45,858 @@ type UserStruct = {
   metadataURI: string;
 };
 
-type MessageStruct = {
-  encryptedContent: string;
-  tag: string;
-  timestamp: bigint;
-};
+function chainUserFrom(value: unknown): ChainUser {
+  const item = value as Partial<ChainUser> & Record<number, unknown>;
 
-type DecryptedInvitation = {
-  recordIndex: number;
-  content: string;
-};
-
-function isEmptyAddress(address?: string) {
-  return !address || address.toLowerCase() === ZERO_ADDRESS.toLowerCase();
+  return {
+    userAddress: (item.userAddress ?? item[0]) as Address,
+    login: String(item.login ?? item[1] ?? ""),
+    name: String(item.name ?? item[2] ?? ""),
+    pubkey: String(item.pubkey ?? item[3] ?? ""),
+    userContract: (item.userContract ?? item[4]) as Address,
+    kind: Number(item.kind ?? item[5] ?? 0),
+    metadataURI: String(item.metadataURI ?? item[6] ?? ""),
+  };
 }
 
-function App() {
-  const { address, isConnected, chain } = useAccount();
-  const publicClient = usePublicClient();
+function shortAddress(address?: string) {
+  if (!address) {
+    return "—";
+  }
 
-  const {
-    connectors,
-    connect,
-    isPending: isConnectPending,
-    error: connectError,
-  } = useConnect();
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
 
+function isZeroAddress(address: string) {
+  return normalizeAddress(address) === ZERO_ADDRESS;
+}
+
+function toAddress(address: string) {
+  return normalizeAddress(address) as Address;
+}
+
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+function getEthereumProvider() {
+  const ethereum = (window as unknown as {
+    ethereum?: EthereumProvider;
+  }).ethereum;
+
+  if (!ethereum) {
+    throw new Error("Injected wallet provider is missing");
+  }
+
+  return ethereum;
+}
+
+async function switchInjectedWalletToAppChain() {
+  const ethereum = getEthereumProvider();
+  const chainIdHex = `0x${appChain.id.toString(16)}`;
+
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chainIdHex }],
+    });
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: number | string }).code
+        : undefined;
+
+    if (code !== 4902 && code !== "4902") {
+      throw error;
+    }
+
+    await ethereum.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: chainIdHex,
+          chainName: appChain.name,
+          nativeCurrency: appChain.nativeCurrency,
+          rpcUrls: [...appChain.rpcUrls.default.http],
+          blockExplorerUrls: appChain.blockExplorers?.default?.url
+            ? [appChain.blockExplorers.default.url]
+            : undefined,
+        },
+      ],
+    });
+  }
+}
+
+export default function App() {
+  const { address, isConnected, chainId } = useAccount();
+  const { connectors, connect, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
 
-  const [login, setLogin] = useState("alice");
-  const [name, setName] = useState("Alice");
-  const [pubkey, setPubkey] = useState("");
-  const [kind, setKind] = useState<0 | 1>(0);
-  const [metadataURI, setMetadataURI] = useState("");
+  const publicClient = usePublicClient({ chainId: appChain.id });
 
-  const [encryptedContent, setEncryptedContent] = useState("hello encrypted message");
-  const [tag, setTag] = useState("demo-tag");
+  const ownerAddress = useMemo(() => {
+    return address ? toAddress(address) : undefined;
+  }, [address]);
 
-  const [recipientLogin, setRecipientLogin] = useState("alice");
-  const [invitationPlaintext, setInvitationPlaintext] = useState(
-    '{"type":"invitation","chatId":"demo-chat-1","note":"hello"}'
-  );
-  const [encryptedRecord, setEncryptedRecord] = useState("");
-
-  const [messageSyncStatus, setMessageSyncStatus] = useState("");
-  const [recordSyncStatus, setRecordSyncStatus] = useState("");
-  const [cryptoStatus, setCryptoStatus] = useState("");
-  const [decryptedInvitations, setDecryptedInvitations] = useState<DecryptedInvitation[]>([]);
-
-  const {
-    data: user,
-    refetch: refetchUser,
-    isLoading: isUserLoading,
-    error: userError,
-  } = useReadContract({
-    address: MAIN_CONNECTOR_ADDRESS,
-    abi: mainConnectorAbi,
-    functionName: "getUserByAddress",
-    args: address ? [address] : undefined,
-    query: {
-      enabled: Boolean(MAIN_CONNECTOR_ADDRESS && address),
-    },
-  });
-
-  const typedUser = user as UserStruct | undefined;
-  const isRegistered = typedUser && !isEmptyAddress(typedUser.userAddress);
-  const userContractAddress =
-    isRegistered && typedUser ? typedUser.userContract : undefined;
-
-  const localProfile = useLiveQuery(
-    () => {
-      if (!address) {
-        return undefined;
-      }
-
-      return db.profiles.get(normalizeAddress(address));
-    },
-    [address]
-  );
-
-  const localKeyPair = useLiveQuery(
-    () => {
-      if (!address) {
-        return undefined;
-      }
-
-      return db.keyPairs.get(normalizeAddress(address));
-    },
-    [address]
-  );
-
-  const localMessages = useLiveQuery(
-    () => {
-      if (!userContractAddress) {
-        return Promise.resolve([] as LocalMessage[]);
-      }
-
-      return db.messages
-        .where("userContract")
-        .equals(normalizeAddress(userContractAddress))
-        .sortBy("messageIndex");
-    },
-    [userContractAddress],
-    []
-  );
-
-  const localRecords = useLiveQuery(
-    () => {
-      if (!MAIN_CONNECTOR_ADDRESS) {
-        return Promise.resolve([] as LocalRecord[]);
-      }
-
-      return db.records
-        .where("mainConnector")
-        .equals(normalizeAddress(MAIN_CONNECTOR_ADDRESS))
-        .sortBy("recordIndex");
-    },
-    [MAIN_CONNECTOR_ADDRESS],
-    [] as LocalRecord[]
-  );
-
-  const currentMessageCursor = useLiveQuery(
-    async () => {
-      if (!userContractAddress) {
-        return 0;
-      }
-
-      const state = await db.syncState.get(messageCursorKey(userContractAddress));
-      return state?.value ?? 0;
-    },
-    [userContractAddress],
-    0
-  );
-
-  const currentRecordsCursor = useLiveQuery(
-    async () => {
-      if (!MAIN_CONNECTOR_ADDRESS) {
-        return 0;
-      }
-
-      const state = await db.syncState.get(
-        mainConnectorRecordsCursorKey(MAIN_CONNECTOR_ADDRESS)
-      );
-
-      return state?.value ?? 0;
-    },
-    [MAIN_CONNECTOR_ADDRESS],
-    0
-  );
-
-  useEffect(() => {
-    async function saveProfile() {
-      if (!address || !typedUser || !isRegistered) {
-        return;
-      }
-
-      await db.profiles.put({
-        walletAddress: normalizeAddress(address),
-        login: typedUser.login,
-        name: typedUser.name,
-        pubkey: typedUser.pubkey,
-        userContract: normalizeAddress(typedUser.userContract),
-        kind: typedUser.kind,
-        metadataURI: typedUser.metadataURI,
-      });
-    }
-
-    saveProfile().catch((error) => {
-      console.error("Failed to save profile to IndexedDB", error);
-    });
-  }, [address, typedUser, isRegistered]);
-
-  const {
-    writeContract,
-    data: registerHash,
-    isPending: isRegisterPending,
-    error: registerError,
-  } = useWriteContract();
-
-  const {
-    isLoading: isRegisterConfirming,
-    isSuccess: isRegisterConfirmed,
-  } = useWaitForTransactionReceipt({
-    hash: registerHash,
-    query: {
-      enabled: Boolean(registerHash),
-    },
-  });
-
-  const {
-    writeContract: writeUserContract,
-    data: addMessageHash,
-    isPending: isAddMessagePending,
-    error: addMessageError,
-  } = useWriteContract();
-
-  const {
-    isLoading: isAddMessageConfirming,
-    isSuccess: isAddMessageConfirmed,
-  } = useWaitForTransactionReceipt({
-    hash: addMessageHash,
-    query: {
-      enabled: Boolean(addMessageHash),
-    },
-  });
-
-  const {
-    writeContract: writeMainConnector,
-    data: addRecordHash,
-    isPending: isAddRecordPending,
-    error: addRecordError,
-  } = useWriteContract();
-
-  const {
-    isLoading: isAddRecordConfirming,
-    isSuccess: isAddRecordConfirmed,
-  } = useWaitForTransactionReceipt({
-    hash: addRecordHash,
-    query: {
-      enabled: Boolean(addRecordHash),
-    },
-  });
-
-  useEffect(() => {
-    if (isRegisterConfirmed) {
-      refetchUser();
-    }
-  }, [isRegisterConfirmed, refetchUser]);
-
-  const visibleConnectors = useMemo(() => {
-    const seen = new Set<string>();
-
-    return connectors.filter((connector) => {
-      const key = `${connector.id}:${connector.name}`;
-
-      if (seen.has(key)) {
-        return false;
-      }
-
-      seen.add(key);
-      return true;
-    });
-  }, [connectors]);
-
-  async function generateKeys() {
-    if (!address) {
-      setCryptoStatus("Wallet is not connected");
-      return;
-    }
-
-    setCryptoStatus("Generating RSA keys...");
-
-    const keyPair = await generateRsaKeyPair();
-    const walletAddress = normalizeAddress(address);
-
-    await db.keyPairs.put({
-      walletAddress,
-      publicKey: keyPair.publicKey,
-      privateKey: keyPair.privateKey,
-      createdAt: Date.now(),
-    });
-
-    setPubkey(keyPair.publicKey);
-    setCryptoStatus("RSA keys generated. Public key is ready for registration.");
-  }
-
-  function register() {
-    if (!MAIN_CONNECTOR_ADDRESS) {
-      alert("VITE_MAIN_CONNECTOR_ADDRESS is not set");
-      return;
-    }
-
-    if (!pubkey.trim()) {
-      alert("Generate RSA keys first");
-      return;
-    }
-
-    writeContract({
-      address: MAIN_CONNECTOR_ADDRESS,
-      abi: mainConnectorAbi,
-      functionName: "register",
-      args: [login, name, pubkey, kind, metadataURI],
-      chainId: 31337,
-    });
-  }
-
-  function addMessage() {
-    if (!userContractAddress) {
-      alert("UserContract address is missing");
-      return;
-    }
-
-    writeUserContract({
-      address: userContractAddress,
-      abi: userContractAbi,
-      functionName: "addMessage",
-      args: [encryptedContent, tag],
-      chainId: 31337,
-    });
-  }
-
-  function addRecord() {
-    if (!MAIN_CONNECTOR_ADDRESS) {
-      alert("MainConnector address is missing");
-      return;
-    }
-
-    if (!encryptedRecord.trim()) {
-      alert("Encrypted record is empty");
-      return;
-    }
-
-    writeMainConnector({
-      address: MAIN_CONNECTOR_ADDRESS,
-      abi: mainConnectorAbi,
-      functionName: "addRecord",
-      args: [encryptedRecord],
-      chainId: 31337,
-    });
-  }
-
-  async function encryptInvitationForRecipient() {
-    if (!publicClient) {
-      setCryptoStatus("Public client is not ready");
-      return;
-    }
-
-    if (!MAIN_CONNECTOR_ADDRESS) {
-      setCryptoStatus("MainConnector address is missing");
-      return;
-    }
-
-    if (!recipientLogin.trim()) {
-      setCryptoStatus("Recipient login is empty");
-      return;
-    }
-
-    setCryptoStatus(`Loading recipient ${recipientLogin}...`);
-
-    const recipient = (await publicClient.readContract({
-      address: MAIN_CONNECTOR_ADDRESS,
-      abi: mainConnectorAbi,
-      functionName: "getUserByLogin",
-      args: [recipientLogin],
-    })) as UserStruct;
-
-    if (isEmptyAddress(recipient.userAddress)) {
-      setCryptoStatus("Recipient not found");
-      return;
+  const walletClient = useMemo(() => {
+    if (!ownerAddress) {
+      return undefined;
     }
 
     try {
-      setCryptoStatus("Encrypting invitation...");
-      const encrypted = await rsaEncrypt(recipient.pubkey, invitationPlaintext);
-      setEncryptedRecord(encrypted);
-      setCryptoStatus("Invitation encrypted. Now click Add record.");
+      return createWalletClient({
+        account: ownerAddress,
+        chain: appChain,
+        transport: custom(getEthereumProvider()),
+      });
+    } catch {
+      return undefined;
+    }
+  }, [ownerAddress]);
+
+  const [keyVersion, setKeyVersion] = useState(0);
+  const [syncNonce, setSyncNonce] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+
+  const [login, setLogin] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  const [chatName, setChatName] = useState("Demo chat");
+  const [selectedChatId, setSelectedChatId] = useState("");
+  const [messageText, setMessageText] = useState("");
+  const [inviteTarget, setInviteTarget] = useState("");
+
+  const rsaKeys = useMemo(() => {
+    return ownerAddress ? loadRsaKeyPair(ownerAddress) : undefined;
+  }, [ownerAddress, keyVersion]);
+
+  const selfProfile = useLiveQuery(async () => {
+    if (!ownerAddress) {
+      return undefined;
+    }
+
+    return db.selfProfiles
+      .where("ownerAddress")
+      .equals(ownerAddress)
+      .first();
+  }, [ownerAddress]);
+
+  const chats = useLiveQuery(async () => {
+    if (!ownerAddress) {
+      return [];
+    }
+
+    return db.chats
+      .where("ownerAddress")
+      .equals(ownerAddress)
+      .toArray();
+  }, [ownerAddress]) ?? [];
+
+  const knownUsers = useLiveQuery(async () => {
+    if (!ownerAddress) {
+      return [];
+    }
+
+    return db.knownUsers
+      .where("ownerAddress")
+      .equals(ownerAddress)
+      .toArray();
+  }, [ownerAddress]) ?? [];
+
+  const chatMembers = useLiveQuery(async () => {
+    if (!ownerAddress) {
+      return [];
+    }
+
+    return db.chatMembers
+      .where("ownerAddress")
+      .equals(ownerAddress)
+      .toArray();
+  }, [ownerAddress]) ?? [];
+
+  const messages = useLiveQuery(async () => {
+    if (!ownerAddress) {
+      return [];
+    }
+
+    const result = await db.messages
+      .where("ownerAddress")
+      .equals(ownerAddress)
+      .toArray();
+
+    return result.sort((a, b) => a.timestamp - b.timestamp);
+  }, [ownerAddress]) ?? [];
+
+  const selectedChat = chats.find((chat) => chat.chatId === selectedChatId);
+  const selectedMessages = messages.filter(
+    (message) => message.chatId === selectedChatId
+  );
+  const selectedMembers = chatMembers.filter(
+    (member) => member.chatId === selectedChatId
+  );
+
+  useEffect(() => {
+    if (!selectedChatId && chats.length > 0) {
+      setSelectedChatId(chats[0].chatId);
+    }
+
+    if (
+      selectedChatId &&
+      chats.length > 0 &&
+      !chats.some((chat) => chat.chatId === selectedChatId)
+    ) {
+      setSelectedChatId(chats[0].chatId);
+    }
+  }, [chats, selectedChatId]);
+
+  useEffect(() => {
+    if (!ownerAddress || !publicClient || !MAIN_CONNECTOR_ADDRESS) {
+      return;
+    }
+
+    addLog("syncer start");
+
+    const stop = startBlockchainSyncer({
+      ownerAddress,
+      publicClient,
+      mainConnectorAddress: MAIN_CONNECTOR_ADDRESS,
+    });
+
+    return () => {
+      addLog("syncer stop");
+      stop();
+    };
+  }, [ownerAddress, publicClient, syncNonce]);
+
+  function addLog(message: string) {
+    const time = new Date().toLocaleTimeString();
+
+    setLog((current) => [`${time} ${message}`, ...current].slice(0, 80));
+  }
+
+  async function run(label: string, action: () => Promise<void>) {
+    if (busy) {
+      return;
+    }
+
+    setBusy(true);
+    addLog(`${label}: start`);
+
+    try {
+      await action();
+      addLog(`${label}: ok`);
     } catch (error) {
       console.error(error);
-      setCryptoStatus(
-        "Encryption failed. Recipient public key is probably not a valid generated RSA key."
-      );
+      addLog(`${label}: failed`);
+      alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function tryDecryptLocalRecords() {
-    if (!address) {
-      setCryptoStatus("Wallet is not connected");
-      return;
+  function requireWallet() {
+    if (!ownerAddress) {
+      throw new Error("Wallet address is missing");
     }
 
-    const keyPair = await db.keyPairs.get(normalizeAddress(address));
-
-    if (!keyPair) {
-      setCryptoStatus("No local private key. Generate RSA keys first.");
-      return;
-    }
-
-    const records = localRecords ?? [];
-    const decrypted: DecryptedInvitation[] = [];
-
-    setCryptoStatus("Trying to decrypt local records...");
-
-    for (const record of records) {
-      try {
-        const content = await rsaDecrypt(keyPair.privateKey, record.encryptedRecord);
-
-        decrypted.push({
-          recordIndex: record.recordIndex,
-          content,
-        });
-      } catch {
-        // This record was not encrypted for this private key.
-      }
-    }
-
-    setDecryptedInvitations(decrypted);
-    setCryptoStatus(`Decryption finished. Found ${decrypted.length} invitation(s).`);
-  }
-
-  async function syncMessages() {
     if (!publicClient) {
-      setMessageSyncStatus("Public client is not ready");
-      return;
+      throw new Error("Public RPC client is not ready");
     }
 
-    if (!userContractAddress) {
-      setMessageSyncStatus("UserContract address is missing");
-      return;
+    if (!walletClient) {
+      throw new Error("Wallet signing client is not ready. Reconnect wallet.");
     }
 
-    setMessageSyncStatus("Syncing messages...");
-
-    const normalizedUserContract = normalizeAddress(userContractAddress);
-    const cursorKey = messageCursorKey(userContractAddress);
-    const currentCursor = (await db.syncState.get(cursorKey))?.value ?? 0;
-
-    const chainMessages = (await publicClient.readContract({
-      address: userContractAddress,
-      abi: userContractAbi,
-      functionName: "getLastMessages",
-      args: [BigInt(currentCursor)],
-    })) as readonly MessageStruct[];
-
-    if (chainMessages.length === 0) {
-      setMessageSyncStatus(`No new messages. Cursor: ${currentCursor}`);
-      return;
-    }
-
-    const rows: LocalMessage[] = chainMessages.map((message, offset) => {
-      const messageIndex = currentCursor + offset;
-
-      return {
-        id: `${normalizedUserContract}:${messageIndex}`,
-        userContract: normalizedUserContract,
-        messageIndex,
-        encryptedContent: message.encryptedContent,
-        tag: message.tag,
-        timestamp: Number(message.timestamp),
-      };
-    });
-
-    await db.transaction("rw", db.messages, db.syncState, async () => {
-      await db.messages.bulkPut(rows);
-      await db.syncState.put({
-        key: cursorKey,
-        value: currentCursor + chainMessages.length,
-      });
-    });
-
-    setMessageSyncStatus(
-      `Synced ${chainMessages.length} message(s). Cursor: ${
-        currentCursor + chainMessages.length
-      }`
-    );
-  }
-
-  async function syncRecords() {
-    if (!publicClient) {
-      setRecordSyncStatus("Public client is not ready");
-      return;
+    if (chainId !== appChain.id) {
+      throw new Error("Switch wallet to configured network");
     }
 
     if (!MAIN_CONNECTOR_ADDRESS) {
-      setRecordSyncStatus("MainConnector address is missing");
-      return;
+      throw new Error("MainConnector address is not configured");
     }
 
-    setRecordSyncStatus("Syncing records...");
+    return {
+      ownerAddress,
+      walletClient,
+      publicClient,
+      mainConnectorAddress: MAIN_CONNECTOR_ADDRESS,
+    };
+  }
 
-    const normalizedMainConnector = normalizeAddress(MAIN_CONNECTOR_ADDRESS);
-    const cursorKey = mainConnectorRecordsCursorKey(MAIN_CONNECTOR_ADDRESS);
+  async function wait(hash: Address | `0x${string}`) {
+    const { publicClient } = requireWallet();
+    await publicClient.waitForTransactionReceipt({ hash });
+  }
 
-    const currentCursor = (await db.syncState.get(cursorKey))?.value ?? 0;
+  async function readUserByAddress(userAddress: Address) {
+    const { publicClient, mainConnectorAddress } = requireWallet();
 
-    const chainRecords = (await publicClient.readContract({
-      address: MAIN_CONNECTOR_ADDRESS,
+    const user = chainUserFrom(await publicClient.readContract({
+      address: mainConnectorAddress,
       abi: mainConnectorAbi,
-      functionName: "getLastRecords",
-      args: [BigInt(currentCursor)],
-    })) as readonly string[];
+      functionName: "getUserByAddress",
+      args: [userAddress],
+    }));
 
-    if (chainRecords.length === 0) {
-      setRecordSyncStatus(`No new records. Cursor: ${currentCursor}`);
-      return;
+    if (isZeroAddress(user.userAddress)) {
+      return undefined;
     }
 
-    const rows: LocalRecord[] = chainRecords.map((record, offset) => {
-      const recordIndex = currentCursor + offset;
+    return user;
+  }
 
-      return {
-        id: `${normalizedMainConnector}:${recordIndex}`,
-        mainConnector: normalizedMainConnector,
-        recordIndex,
-        encryptedRecord: record,
-      };
+  async function readUserByLogin(userLogin: string) {
+    const { publicClient, mainConnectorAddress } = requireWallet();
+
+    const user = chainUserFrom(await publicClient.readContract({
+      address: mainConnectorAddress,
+      abi: mainConnectorAbi,
+      functionName: "getUserByLogin",
+      args: [userLogin],
+    }));
+
+    if (isZeroAddress(user.userAddress)) {
+      return undefined;
+    }
+
+    return user;
+  }
+
+  async function handleEnsureKeys() {
+    await run("ensure RSA keys", async () => {
+      if (!ownerAddress) {
+        throw new Error("Wallet address is missing");
+      }
+
+      await ensureRsaKeyPair(ownerAddress);
+      setKeyVersion((value) => value + 1);
     });
+  }
 
-    await db.transaction("rw", db.records, db.syncState, async () => {
-      await db.records.bulkPut(rows);
-      await db.syncState.put({
-        key: cursorKey,
-        value: currentCursor + chainRecords.length,
+  async function handleRegister() {
+    await run("register", async () => {
+      const wallet = requireWallet();
+      const keys = await ensureRsaKeyPair(wallet.ownerAddress);
+
+      if (!login.trim()) {
+        throw new Error("Login is empty");
+      }
+
+      const hash = await wallet.walletClient.writeContract({
+        address: wallet.mainConnectorAddress,
+        abi: mainConnectorAbi,
+        functionName: "register",
+        args: [
+          login.trim(),
+          displayName.trim() || login.trim(),
+          keys.publicKey,
+          0,
+          "",
+        ],
       });
+
+      await wait(hash);
+
+      setKeyVersion((value) => value + 1);
+      setSyncNonce((value) => value + 1);
     });
-
-    setRecordSyncStatus(
-      `Synced ${chainRecords.length} record(s). Cursor: ${
-        currentCursor + chainRecords.length
-      }`
-    );
   }
 
-  async function refreshUser() {
-    await refetchUser();
+  async function handleCreateChat() {
+    await run("create chat", async () => {
+      const wallet = requireWallet();
+
+      if (!selfProfile) {
+        throw new Error("Register first");
+      }
+
+      const keys = await ensureRsaKeyPair(wallet.ownerAddress);
+
+      const chatKey = generateChatKey();
+      const chatId = await deriveChatId(chatKey);
+
+      const creationBox = await aesEncrypt(
+        chatKey,
+        encodePayload(
+          createChatCreationPayload({
+            name: chatName.trim() || "Unnamed chat",
+          })
+        )
+      );
+
+      const creationTag = await generateMessageTag(chatKey);
+
+      const creationHash = await wallet.walletClient.writeContract({
+        address: selfProfile.userContract as Address,
+        abi: userContractAbi,
+        functionName: "addMessage",
+        args: [creationBox, creationTag],
+      });
+
+      await wait(creationHash);
+
+      const selfInvitationBox = await aesEncrypt(
+        chatKey,
+        encodePayload(
+          createInvitationPayload({
+            invited: wallet.ownerAddress,
+            invitedBy: wallet.ownerAddress,
+          })
+        )
+      );
+
+      const selfInvitationTag = await generateMessageTag(chatKey);
+
+      const selfInvitationHash = await wallet.walletClient.writeContract({
+        address: selfProfile.userContract as Address,
+        abi: userContractAbi,
+        functionName: "addMessage",
+        args: [selfInvitationBox, selfInvitationTag],
+      });
+
+      await wait(selfInvitationHash);
+
+      const mainInvitation = await rsaEncrypt(
+        keys.publicKey,
+        encodePayload(
+          createMainInvitationPayload({
+            chatKey,
+            inviter: wallet.ownerAddress,
+          })
+        )
+      );
+
+      const recordHash = await wallet.walletClient.writeContract({
+        address: wallet.mainConnectorAddress,
+        abi: mainConnectorAbi,
+        functionName: "addRecord",
+        args: [mainInvitation],
+      });
+
+      await wait(recordHash);
+
+      setSelectedChatId(chatId);
+      setSyncNonce((value) => value + 1);
+    });
   }
 
-  if (!MAIN_CONNECTOR_ADDRESS) {
-    return (
-      <main className="page">
-        <section className="card">
-          <h1>Messenger</h1>
-          <p className="error">VITE_MAIN_CONNECTOR_ADDRESS is not set.</p>
-          <p>
-            Deploy MainConnector locally and put its address into{" "}
-            <code>apps/web/.env.local</code>.
-          </p>
-        </section>
-      </main>
-    );
+  async function handleSendMessage() {
+    await run("send message", async () => {
+      const wallet = requireWallet();
+
+      if (!selfProfile) {
+        throw new Error("Register first");
+      }
+
+      if (!selectedChat) {
+        throw new Error("Select chat");
+      }
+
+      if (!messageText.trim()) {
+        throw new Error("Message is empty");
+      }
+
+      const encrypted = await aesEncrypt(
+        selectedChat.chatKey,
+        encodePayload(
+          createMessagePayload({
+            text: messageText.trim(),
+          })
+        )
+      );
+
+      const tag = await generateMessageTag(selectedChat.chatKey);
+
+      const hash = await wallet.walletClient.writeContract({
+        address: selfProfile.userContract as Address,
+        abi: userContractAbi,
+        functionName: "addMessage",
+        args: [encrypted, tag],
+      });
+
+      await wait(hash);
+
+      setMessageText("");
+      setSyncNonce((value) => value + 1);
+    });
   }
 
-  if (!isConnected) {
-    return (
-      <main className="page">
-        <section className="card">
-          <h1>Connect wallet</h1>
-          <p>Choose an injected EVM wallet detected by the browser.</p>
+  async function handleInvite() {
+    await run("invite user", async () => {
+      const wallet = requireWallet();
 
-          <div className="wallet-list">
-            {visibleConnectors.map((connector) => (
-              <button
-                key={`${connector.id}:${connector.name}`}
-                onClick={() => connect({ connector })}
-                disabled={isConnectPending}
-              >
-                {connector.name}
-              </button>
-            ))}
-          </div>
+      if (!selfProfile) {
+        throw new Error("Register first");
+      }
 
-          {visibleConnectors.length === 0 && (
-            <p className="error">
-              No injected wallet found. Install MetaMask, Rabby, SubWallet EVM,
-              or another EVM extension.
-            </p>
-          )}
+      if (!selectedChat) {
+        throw new Error("Select chat");
+      }
 
-          {connectError && <p className="error">{connectError.message}</p>}
-        </section>
-      </main>
-    );
+      const target = inviteTarget.trim();
+
+      if (!target) {
+        throw new Error("Invite target is empty");
+      }
+
+      const invitedUser =
+        target.startsWith("0x") && target.length === 42
+          ? await readUserByAddress(toAddress(target))
+          : await readUserByLogin(target);
+
+      if (!invitedUser) {
+        throw new Error("User not found");
+      }
+
+      const invitationEvent = await aesEncrypt(
+        selectedChat.chatKey,
+        encodePayload(
+          createInvitationPayload({
+            invited: toAddress(invitedUser.userAddress),
+            invitedBy: wallet.ownerAddress,
+          })
+        )
+      );
+
+      const invitationTag = await generateMessageTag(selectedChat.chatKey);
+
+      const messageHash = await wallet.walletClient.writeContract({
+        address: selfProfile.userContract as Address,
+        abi: userContractAbi,
+        functionName: "addMessage",
+        args: [invitationEvent, invitationTag],
+      });
+
+      await wait(messageHash);
+
+      const mainInvitation = await rsaEncrypt(
+        invitedUser.pubkey,
+        encodePayload(
+          createMainInvitationPayload({
+            chatKey: selectedChat.chatKey,
+            inviter: wallet.ownerAddress,
+          })
+        )
+      );
+
+      const recordHash = await wallet.walletClient.writeContract({
+        address: wallet.mainConnectorAddress,
+        abi: mainConnectorAbi,
+        functionName: "addRecord",
+        args: [mainInvitation],
+      });
+
+      await wait(recordHash);
+
+      setInviteTarget("");
+      setSyncNonce((value) => value + 1);
+    });
   }
+
+  async function handleDeleteIndexedDb() {
+    await run("delete IndexedDB", async () => {
+      await db.delete();
+      window.location.reload();
+    });
+  }
+
+  const wrongNetwork = isConnected && chainId !== appChain.id;
 
   return (
     <main className="page">
-      <section className="card">
-        <div className="topbar">
-          <div>
-            <h1>Private Messenger</h1>
-            <p className="muted">Chain: {chain?.name ?? "unknown"}</p>
-          </div>
-
-          <button onClick={() => disconnect()}>Disconnect</button>
+      <section className="hero">
+        <div>
+          <div className="eyebrow">Mantle Private Messenger</div>
+          <h1>Dev console</h1>
+          <p>
+            Debug UI для проверки регистрации, чатов, сообщений, инвайтов,
+            IndexedDB и blockchain syncer.
+          </p>
         </div>
 
-        <div className="address-box">
-          <strong>Wallet</strong>
-          <code>{address}</code>
-        </div>
-
-        <div className="address-box">
-          <strong>MainConnector</strong>
-          <code>{MAIN_CONNECTOR_ADDRESS}</code>
-        </div>
-
-        <section className="profile">
-          <h2>Local RSA keys</h2>
-
-          <button onClick={generateKeys}>Generate RSA keys</button>
-
-          {localKeyPair ? (
-            <p className="success">Local RSA key pair exists for this wallet.</p>
+        <div className="heroActions">
+          {!isConnected ? (
+            <button
+              onClick={() => connect({ connector: connectors[0] })}
+              disabled={!connectors[0] || isConnecting}
+            >
+              Connect wallet
+            </button>
           ) : (
-            <p className="muted">No local RSA keys yet.</p>
+            <button className="secondary" onClick={() => disconnect()}>
+              Disconnect
+            </button>
           )}
 
-          {cryptoStatus && <p className="muted">{cryptoStatus}</p>}
-        </section>
-
-        <button onClick={refreshUser} disabled={isUserLoading}>
-          Refresh user
-        </button>
-
-        {userError && <p className="error">{userError.message}</p>}
-        {isUserLoading && <p>Loading user...</p>}
-
-        {!isUserLoading && !isRegistered && (
-          <section className="form">
-            <h2>Register account</h2>
-
-            <label>
-              Login
-              <input
-                value={login}
-                onChange={(event) => setLogin(event.target.value)}
-                placeholder="alice"
-              />
-            </label>
-
-            <label>
-              Name
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Alice"
-              />
-            </label>
-
-            <label>
-              RSA public key
-              <textarea
-                value={pubkey}
-                onChange={(event) => setPubkey(event.target.value)}
-                rows={4}
-                placeholder="Click Generate RSA keys first"
-              />
-            </label>
-
-            <label>
-              Account kind
-              <select
-                value={kind}
-                onChange={(event) => setKind(Number(event.target.value) as 0 | 1)}
-              >
-                <option value={0}>Human</option>
-                <option value={1}>Agent</option>
-              </select>
-            </label>
-
-            <label>
-              Metadata URI
-              <input
-                value={metadataURI}
-                onChange={(event) => setMetadataURI(event.target.value)}
-                placeholder="optional"
-              />
-            </label>
-
+          {wrongNetwork && (
             <button
-              onClick={register}
-              disabled={isRegisterPending || isRegisterConfirming}
+              onClick={async () => {
+                await switchInjectedWalletToAppChain();
+                window.location.reload();
+              }}
             >
-              {isRegisterPending || isRegisterConfirming
-                ? "Registering..."
-                : "Register"}
+              Switch to configured network
             </button>
+          )}
+        </div>
+      </section>
 
-            {registerHash && (
-              <p>
-                Tx: <code>{registerHash}</code>
-              </p>
-            )}
+      <section className="grid topGrid">
+        <div className="card">
+          <h2>Wallet</h2>
+          <dl>
+            <dt>Address</dt>
+            <dd>{ownerAddress || "—"}</dd>
 
-            {isRegisterConfirmed && (
-              <p className="success">
-                Registration confirmed. User profile will refresh automatically.
-              </p>
-            )}
+            <dt>Network</dt>
+            <dd className={wrongNetwork ? "bad" : "good"}>
+              {chainId || "—"}
+            </dd>
 
-            {registerError && <p className="error">{registerError.message}</p>}
-          </section>
-        )}
+            <dt>MainConnector</dt>
+            <dd>{MAIN_CONNECTOR_ADDRESS || "—"}</dd>
 
-        {!isUserLoading && isRegistered && typedUser && (
-          <>
-            <section className="profile">
-              <h2>Registered profile</h2>
+            <dt>RSA key</dt>
+            <dd className={rsaKeys ? "good" : "bad"}>
+              {rsaKeys ? "exists" : "missing"}
+            </dd>
+          </dl>
 
-              <div className="grid">
-                <span>Login</span>
-                <code>{typedUser.login}</code>
+          <div className="row">
+            <button disabled={!isConnected || busy} onClick={handleEnsureKeys}>
+              Ensure RSA keys
+            </button>
+            <button
+              className="danger"
+              disabled={busy}
+              onClick={handleDeleteIndexedDb}
+            >
+              Delete IndexedDB
+            </button>
+          </div>
+        </div>
 
-                <span>Name</span>
-                <code>{typedUser.name}</code>
+        <div className="card">
+          <h2>Self profile</h2>
+          {selfProfile ? (
+            <dl>
+              <dt>Login</dt>
+              <dd>{selfProfile.login}</dd>
 
-                <span>Kind</span>
-                <code>{typedUser.kind === 0 ? "Human" : "Agent"}</code>
+              <dt>Name</dt>
+              <dd>{selfProfile.name}</dd>
 
-                <span>UserContract</span>
-                <code>{typedUser.userContract}</code>
+              <dt>UserContract</dt>
+              <dd>{selfProfile.userContract}</dd>
 
-                <span>Public key</span>
-                <code>{typedUser.pubkey}</code>
+              <dt>Main cursor</dt>
+              <dd>{selfProfile.mainRecordsCursor}</dd>
+            </dl>
+          ) : (
+            <p className="muted">Not registered / not synced yet.</p>
+          )}
+        </div>
 
-                <span>Metadata URI</span>
-                <code>{typedUser.metadataURI || "-"}</code>
-              </div>
-            </section>
+        <div className="card">
+          <h2>Register</h2>
+          <input
+            placeholder="login"
+            value={login}
+            onChange={(event) => setLogin(event.target.value)}
+          />
+          <input
+            placeholder="display name"
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+          <button
+            disabled={!isConnected || wrongNetwork || busy}
+            onClick={handleRegister}
+          >
+            Register
+          </button>
+        </div>
+      </section>
 
-            <section className="profile">
-              <h2>IndexedDB profile cache</h2>
+      <section className="grid actionGrid">
+        <div className="card">
+          <h2>Create chat</h2>
+          <input
+            placeholder="chat name"
+            value={chatName}
+            onChange={(event) => setChatName(event.target.value)}
+          />
+          <button
+            disabled={!selfProfile || wrongNetwork || busy}
+            onClick={handleCreateChat}
+          >
+            Create chat
+          </button>
+        </div>
 
-              {!localProfile && <p className="muted">No local profile cached yet.</p>}
+        <div className="card">
+          <h2>Send message</h2>
+          <select
+            value={selectedChatId}
+            onChange={(event) => setSelectedChatId(event.target.value)}
+          >
+            <option value="">Select chat</option>
+            {chats.map((chat) => (
+              <option key={chat.chatId} value={chat.chatId}>
+                {chat.name} / {shortAddress(chat.chatId)}
+              </option>
+            ))}
+          </select>
+          <textarea
+            placeholder="message"
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
+          />
+          <button
+            disabled={!selectedChat || !selfProfile || wrongNetwork || busy}
+            onClick={handleSendMessage}
+          >
+            Send
+          </button>
+        </div>
 
-              {localProfile && (
-                <div className="grid">
-                  <span>Wallet</span>
-                  <code>{localProfile.walletAddress}</code>
+        <div className="card">
+          <h2>Invite</h2>
+          <input
+            placeholder="login or 0x address"
+            value={inviteTarget}
+            onChange={(event) => setInviteTarget(event.target.value)}
+          />
+          <button
+            disabled={!selectedChat || !selfProfile || wrongNetwork || busy}
+            onClick={handleInvite}
+          >
+            Invite
+          </button>
+        </div>
+      </section>
 
-                  <span>Login</span>
-                  <code>{localProfile.login}</code>
+      <section className="grid dataGrid">
+        <div className="card wide">
+          <h2>Chats</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Chat ID</th>
+                <th>Key</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chats.map((chat) => (
+                <tr
+                  key={chat.chatId}
+                  className={chat.chatId === selectedChatId ? "selected" : ""}
+                  onClick={() => setSelectedChatId(chat.chatId)}
+                >
+                  <td>{chat.name}</td>
+                  <td>{chat.chatId}</td>
+                  <td>{shortAddress(chat.chatKey)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-                  <span>UserContract</span>
-                  <code>{localProfile.userContract}</code>
+        <div className="card">
+          <h2>Selected chat</h2>
+          {selectedChat ? (
+            <dl>
+              <dt>Name</dt>
+              <dd>{selectedChat.name}</dd>
+              <dt>Chat ID</dt>
+              <dd>{selectedChat.chatId}</dd>
+              <dt>Members</dt>
+              <dd>{selectedMembers.length}</dd>
+              <dt>Messages</dt>
+              <dd>{selectedMessages.length}</dd>
+            </dl>
+          ) : (
+            <p className="muted">No chat selected.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="grid dataGrid">
+        <div className="card wide">
+          <h2>Messages</h2>
+          <div className="messages">
+            {selectedMessages.map((message) => (
+              <article key={message.id} className="message">
+                <div className="messageMeta">
+                  <span>{shortAddress(message.authorAddress)}</span>
+                  <span>
+                    {new Date(message.timestamp * 1000).toLocaleString()}
+                  </span>
+                  <span>#{message.sourceMessageIndex}</span>
                 </div>
-              )}
-            </section>
+                <p>{message.content}</p>
+              </article>
+            ))}
+          </div>
+        </div>
 
-            <section className="form">
-              <h2>Add demo message to UserContract</h2>
+        <div className="card">
+          <h2>Chat members</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Cursor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedMembers.map((member) => (
+                <tr key={member.id}>
+                  <td>{shortAddress(member.userAddress)}</td>
+                  <td>{member.cursor}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-              <label>
-                Encrypted content
-                <textarea
-                  value={encryptedContent}
-                  onChange={(event) => setEncryptedContent(event.target.value)}
-                  rows={3}
-                />
-              </label>
+      <section className="grid dataGrid">
+        <div className="card wide">
+          <h2>Known users</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Login</th>
+                <th>Name</th>
+                <th>Address</th>
+                <th>UserContract</th>
+              </tr>
+            </thead>
+            <tbody>
+              {knownUsers.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.login}</td>
+                  <td>{user.name}</td>
+                  <td>{user.userAddress}</td>
+                  <td>{user.userContract}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-              <label>
-                Tag
-                <input
-                  value={tag}
-                  onChange={(event) => setTag(event.target.value)}
-                />
-              </label>
-
-              <button
-                onClick={addMessage}
-                disabled={isAddMessagePending || isAddMessageConfirming}
-              >
-                {isAddMessagePending || isAddMessageConfirming
-                  ? "Adding message..."
-                  : "Add message"}
-              </button>
-
-              {addMessageHash && (
-                <p>
-                  Tx: <code>{addMessageHash}</code>
-                </p>
-              )}
-
-              {isAddMessageConfirmed && (
-                <p className="success">
-                  Message confirmed. Click Sync messages.
-                </p>
-              )}
-
-              {addMessageError && (
-                <p className="error">{addMessageError.message}</p>
-              )}
-            </section>
-
-            <section className="profile">
-              <div className="topbar">
-                <div>
-                  <h2>Local messages from IndexedDB</h2>
-                  <p className="muted">Cursor: {currentMessageCursor ?? 0}</p>
-                </div>
-
-                <button onClick={syncMessages}>Sync messages</button>
-              </div>
-
-              {messageSyncStatus && <p className="muted">{messageSyncStatus}</p>}
-
-              {(!localMessages || localMessages.length === 0) && (
-                <p className="muted">No local messages yet.</p>
-              )}
-
-              <div className="messages">
-                {(localMessages ?? []).map((message) => (
-                  <article className="message" key={message.id}>
-                    <div>
-                      <strong>#{message.messageIndex}</strong>
-                    </div>
-
-                    <div>
-                      <span>Encrypted content</span>
-                      <code>{message.encryptedContent}</code>
-                    </div>
-
-                    <div>
-                      <span>Tag</span>
-                      <code>{message.tag}</code>
-                    </div>
-
-                    <div>
-                      <span>Timestamp</span>
-                      <code>{message.timestamp}</code>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="form">
-              <h2>Encrypt invitation record</h2>
-
-              <label>
-                Recipient login
-                <input
-                  value={recipientLogin}
-                  onChange={(event) => setRecipientLogin(event.target.value)}
-                  placeholder="alice"
-                />
-              </label>
-
-              <label>
-                Invitation plaintext
-                <textarea
-                  value={invitationPlaintext}
-                  onChange={(event) => setInvitationPlaintext(event.target.value)}
-                  rows={4}
-                />
-              </label>
-
-              <button onClick={encryptInvitationForRecipient}>
-                Encrypt invitation for recipient
-              </button>
-
-              <label>
-                Encrypted invitation record
-                <textarea
-                  value={encryptedRecord}
-                  onChange={(event) => setEncryptedRecord(event.target.value)}
-                  rows={5}
-                  placeholder="Encrypted record will appear here"
-                />
-              </label>
-
-              <button
-                onClick={addRecord}
-                disabled={isAddRecordPending || isAddRecordConfirming}
-              >
-                {isAddRecordPending || isAddRecordConfirming
-                  ? "Adding record..."
-                  : "Add record to MainConnector"}
-              </button>
-
-              {addRecordHash && (
-                <p>
-                  Tx: <code>{addRecordHash}</code>
-                </p>
-              )}
-
-              {isAddRecordConfirmed && (
-                <p className="success">
-                  Record confirmed. Click Sync MainConnector records.
-                </p>
-              )}
-
-              {addRecordError && (
-                <p className="error">{addRecordError.message}</p>
-              )}
-            </section>
-
-            <section className="profile">
-              <div className="topbar">
-                <div>
-                  <h2>Local MainConnector records from IndexedDB</h2>
-                  <p className="muted">Cursor: {currentRecordsCursor ?? 0}</p>
-                </div>
-
-                <button onClick={syncRecords}>Sync MainConnector records</button>
-              </div>
-
-              {recordSyncStatus && <p className="muted">{recordSyncStatus}</p>}
-
-              {(!localRecords || localRecords.length === 0) && (
-                <p className="muted">No local records yet.</p>
-              )}
-
-              <div className="messages">
-                {(localRecords ?? []).map((record) => (
-                  <article className="message" key={record.id}>
-                    <div>
-                      <strong>#{record.recordIndex}</strong>
-                    </div>
-
-                    <div>
-                      <span>Encrypted record</span>
-                      <code>{record.encryptedRecord}</code>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="profile">
-              <div className="topbar">
-                <div>
-                  <h2>Try decrypt local records</h2>
-                  <p className="muted">
-                    This tries every local MainConnector record with your local private key.
-                  </p>
-                </div>
-
-                <button onClick={tryDecryptLocalRecords}>
-                  Try decrypt records
-                </button>
-              </div>
-
-              {decryptedInvitations.length === 0 && (
-                <p className="muted">No decrypted invitations yet.</p>
-              )}
-
-              <div className="messages">
-                {decryptedInvitations.map((invitation) => (
-                  <article className="message" key={invitation.recordIndex}>
-                    <div>
-                      <strong>Record #{invitation.recordIndex}</strong>
-                    </div>
-
-                    <div>
-                      <span>Decrypted content</span>
-                      <code>{invitation.content}</code>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
+        <div className="card logCard">
+          <h2>Activity</h2>
+          <div className="log">
+            {log.map((item, index) => (
+              <div key={`${item}-${index}`}>{item}</div>
+            ))}
+          </div>
+        </div>
       </section>
     </main>
   );
 }
-
-export default App;

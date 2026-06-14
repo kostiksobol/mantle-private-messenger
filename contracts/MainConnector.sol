@@ -19,6 +19,8 @@ contract MainConnector {
         string metadataURI;
     }
 
+    event RecordAdded(uint256 indexed index, string record);
+
     User[] private users;
 
     mapping(address => uint256) private addressToUserIndex;
@@ -60,7 +62,9 @@ contract MainConnector {
     }
 
     function addRecord(string calldata record) external {
+        uint256 index = records.length;
         records.push(record);
+        emit RecordAdded(index, record);
     }
 
     function getLastRecords(

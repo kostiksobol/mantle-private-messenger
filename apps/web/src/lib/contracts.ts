@@ -7,6 +7,15 @@ export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as cons
 
 export const mainConnectorAbi = [
   {
+    type: "event",
+    name: "RecordAdded",
+    inputs: [
+      { name: "index", type: "uint256", indexed: true },
+      { name: "record", type: "string", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
     type: "function",
     name: "register",
     stateMutability: "nonpayable",
@@ -78,6 +87,15 @@ export const mainConnectorAbi = [
 ] as const;
 
 export const userContractAbi = [
+  {
+    type: "event",
+    name: "MessageAdded",
+    inputs: [
+      { name: "index", type: "uint256", indexed: true },
+      { name: "tag", type: "string", indexed: false },
+    ],
+    anonymous: false,
+  },
   {
     type: "function",
     name: "owner",
