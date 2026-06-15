@@ -2412,3 +2412,172 @@ textarea:focus {
   min-width: 92px;
   justify-content: center;
 }
+
+.identityShell {
+  min-height: 100vh;
+  padding: 48px;
+  background:
+    radial-gradient(circle at top left, rgba(90, 120, 255, 0.18), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(0, 220, 180, 0.12), transparent 30%),
+    #070a12;
+  color: #f5f7fb;
+}
+
+.identityHero {
+  max-width: 760px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+
+.identityHero h1 {
+  margin: 10px 0;
+  font-size: clamp(36px, 5vw, 64px);
+  letter-spacing: -0.06em;
+}
+
+.identityHero p {
+  color: rgba(245, 247, 251, 0.72);
+}
+
+.identityNetwork {
+  font-size: 13px;
+  color: rgba(245, 247, 251, 0.55);
+}
+
+.identityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.identityCard {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 28px;
+  padding: 22px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.identityCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.identityCardHeader h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.identityCardHeader p {
+  margin: 0;
+  color: rgba(245, 247, 251, 0.58);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.identityList {
+  display: grid;
+  gap: 10px;
+}
+
+.identityRowWrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.identityRow {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.055);
+  color: inherit;
+  border-radius: 18px;
+  padding: 14px;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.identityRow:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.identityRow strong,
+.identityRow small {
+  display: block;
+}
+
+.identityRow small {
+  margin-top: 4px;
+  color: rgba(245, 247, 251, 0.52);
+}
+
+.identityBadge {
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgba(245, 247, 251, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 9px;
+}
+
+.emptyIdentityState {
+  color: rgba(245, 247, 251, 0.58);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 18px;
+  font-size: 14px;
+}
+
+.dangerMiniButton {
+  border: 1px solid rgba(255, 80, 80, 0.22);
+  background: rgba(255, 80, 80, 0.08);
+  color: #ffb7b7;
+  border-radius: 14px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.dangerMiniButton:hover {
+  background: rgba(255, 80, 80, 0.14);
+}
+
+.usersBackButton {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 50;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 12, 22, 0.82);
+  color: #f5f7fb;
+  border-radius: 999px;
+  padding: 9px 14px;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+}
+
+.usersBackButton:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+@media (max-width: 900px) {
+  .identityShell {
+    padding: 28px 16px;
+  }
+
+  .identityGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .identityCardHeader {
+    flex-direction: column;
+  }
+}

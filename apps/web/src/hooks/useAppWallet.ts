@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createWalletClient, custom, type Address } from "viem";
 import {
   useAccount,
@@ -12,6 +12,8 @@ import { appChain } from "@mantle/messenger-core/wagmi";
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on?: (event: string, handler: (...args: any[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: any[]) => void) => void;
 };
 
 function getEthereumProvider() {
@@ -24,6 +26,12 @@ function getEthereumProvider() {
   }
 
   return ethereum;
+}
+
+function getOptionalEthereumProvider() {
+  return (window as unknown as {
+    ethereum?: EthereumProvider;
+  }).ethereum;
 }
 
 function toAddress(address: string) {
@@ -73,9 +81,59 @@ export function useAppWallet() {
 
   const publicClient = usePublicClient({ chainId: appChain.id });
 
+  const [walletAccounts, setWalletAccounts] = useState<Address[]>([]);
+
   const ownerAddress = useMemo(() => {
     return address ? toAddress(address) : undefined;
   }, [address]);
+
+  const refreshWalletAccounts = useCallback(async () => {
+    const ethereum = getOptionalEthereumProvider();
+
+    if (!ethereum) {
+      setWalletAccounts([]);
+      return;
+    }
+
+    const result = await ethereum.request({ method: "eth_accounts" });
+    const accounts = Array.isArray(result) ? result : [];
+
+    setWalletAccounts(
+      accounts
+        .filter((item): item is string => typeof item === "string")
+        .map(toAddress)
+    );
+  }, []);
+
+  useEffect(() => {
+    void refreshWalletAccounts();
+  }, [isConnected, ownerAddress, refreshWalletAccounts]);
+
+  useEffect(() => {
+    const ethereum = getOptionalEthereumProvider();
+
+    if (!ethereum?.on) {
+      return;
+    }
+
+    const handleAccountsChanged = () => {
+      void refreshWalletAccounts();
+    };
+
+    ethereum.on("accountsChanged", handleAccountsChanged);
+
+    return () => {
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+    };
+  }, [refreshWalletAccounts]);
+
+  const createWalletClientForAddress = useCallback((account: Address) => {
+    return createWalletClient({
+      account,
+      chain: appChain,
+      transport: custom(getEthereumProvider()),
+    });
+  }, []);
 
   const walletClient = useMemo(() => {
     if (!ownerAddress) {
@@ -83,15 +141,11 @@ export function useAppWallet() {
     }
 
     try {
-      return createWalletClient({
-        account: ownerAddress,
-        chain: appChain,
-        transport: custom(getEthereumProvider()),
-      });
+      return createWalletClientForAddress(ownerAddress);
     } catch {
       return undefined;
     }
-  }, [ownerAddress]);
+  }, [createWalletClientForAddress, ownerAddress]);
 
   const wrongNetwork = isConnected && chainId !== appChain.id;
 
@@ -103,6 +157,7 @@ export function useAppWallet() {
     appChain,
     address,
     ownerAddress,
+    walletAccounts,
     isConnected,
     chainId,
     wrongNetwork,
@@ -112,6 +167,8 @@ export function useAppWallet() {
     disconnect,
     publicClient,
     walletClient,
+    createWalletClientForAddress,
+    refreshWalletAccounts,
     switchToAppChain,
   };
 }

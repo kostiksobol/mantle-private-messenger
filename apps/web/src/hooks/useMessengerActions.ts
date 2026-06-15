@@ -7,7 +7,6 @@ import {
   MAIN_CONNECTOR_ADDRESS,
   mainConnectorAbi,
 } from "@mantle/messenger-core/contracts";
-import { appChain } from "@mantle/messenger-core/wagmi";
 import {
   createChat,
   inviteChatMember,
@@ -16,13 +15,11 @@ import {
 } from "@mantle/messenger-core/messenger/writeActions";
 import type { MessengerTransactionLayer } from "@mantle/messenger-core/chain/transactionLayer";
 import type { LocalChat, SelfProfile } from "../components/types";
-import { tryWalletSendCallsBatch } from "../adapters/walletBatch";
 
 type UseMessengerActionsArgs = {
   ownerAddress?: Address;
-  chainId?: number;
   publicClient?: any;
-  walletClient?: any;
+  transactions?: MessengerTransactionLayer;
   selfProfile?: SelfProfile;
   selectedChat?: LocalChat;
   login: string;
@@ -38,9 +35,8 @@ type UseMessengerActionsArgs = {
 
 export function useMessengerActions({
   ownerAddress,
-  chainId,
   publicClient,
-  walletClient,
+  transactions,
   selfProfile,
   selectedChat,
   login,
@@ -90,21 +86,17 @@ export function useMessengerActions({
     [addActivity, busy]
   );
 
-  const requireWallet = useCallback(() => {
+  const requireActionContext = useCallback(() => {
     if (!ownerAddress) {
-      throw new Error("Wallet address is missing");
+      throw new Error("User address is missing");
     }
 
     if (!publicClient) {
       throw new Error("Public RPC client is not ready");
     }
 
-    if (!walletClient) {
-      throw new Error("Wallet signing client is not ready. Reconnect wallet.");
-    }
-
-    if (chainId !== appChain.id) {
-      throw new Error("Switch wallet to configured network");
+    if (!transactions) {
+      throw new Error("Transaction layer is not ready");
     }
 
     if (!MAIN_CONNECTOR_ADDRESS) {
@@ -113,63 +105,41 @@ export function useMessengerActions({
 
     return {
       ownerAddress,
-      walletClient,
       publicClient,
+      transactions,
       mainConnectorAddress: MAIN_CONNECTOR_ADDRESS,
     };
-  }, [chainId, ownerAddress, publicClient, walletClient]);
+  }, [ownerAddress, publicClient, transactions]);
 
   const wait = useCallback(
     async (hash: Hash) => {
-      const wallet = requireWallet();
-      await wallet.publicClient.waitForTransactionReceipt({ hash });
+      const ctx = requireActionContext();
+      await ctx.publicClient.waitForTransactionReceipt({ hash });
     },
-    [requireWallet]
+    [requireActionContext]
   );
 
-  const makeTransactionLayer = useCallback((): MessengerTransactionLayer => {
-    const wallet = requireWallet();
-
-    return {
-      writeContract: async (args) => {
-        return wallet.walletClient.writeContract({
-          account: wallet.ownerAddress,
-          chain: appChain,
-          ...args,
-        } as any);
-      },
-
-      sendCallsBatch: async (calls) => {
-        return tryWalletSendCallsBatch({
-          from: wallet.ownerAddress,
-          chainId: appChain.id,
-          calls,
-        });
-      },
-    };
-  }, [requireWallet]);
-
   const makeWriteContext = useCallback((): MessengerWriteContext => {
-    const wallet = requireWallet();
+    const ctx = requireActionContext();
 
     if (!selfProfile) {
       throw new Error("Register first");
     }
 
     return {
-      ownerAddress: wallet.ownerAddress,
-      publicClient: wallet.publicClient,
-      transactions: makeTransactionLayer(),
+      ownerAddress: ctx.ownerAddress,
+      publicClient: ctx.publicClient,
+      transactions: ctx.transactions,
       selfProfile,
-      mainConnectorAddress: wallet.mainConnectorAddress,
+      mainConnectorAddress: ctx.mainConnectorAddress,
       addActivity,
     };
-  }, [addActivity, makeTransactionLayer, requireWallet, selfProfile]);
+  }, [addActivity, requireActionContext, selfProfile]);
 
   const handleEnsureKeys = useCallback(async () => {
     await run("ensure RSA keys", async () => {
       if (!ownerAddress) {
-        throw new Error("Wallet address is missing");
+        throw new Error("User address is missing");
       }
 
       await ensureRsaKeyPair(ownerAddress);
@@ -179,17 +149,15 @@ export function useMessengerActions({
 
   const handleRegister = useCallback(async () => {
     await run("register", async () => {
-      const wallet = requireWallet();
-      const keys = await ensureRsaKeyPair(wallet.ownerAddress);
+      const ctx = requireActionContext();
+      const keys = await ensureRsaKeyPair(ctx.ownerAddress);
 
       if (!login.trim()) {
         throw new Error("Login is empty");
       }
 
-      const hash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: wallet.mainConnectorAddress,
+      const hash = await ctx.transactions.writeContract({
+        address: ctx.mainConnectorAddress,
         abi: mainConnectorAbi,
         functionName: "register",
         args: [
@@ -206,7 +174,7 @@ export function useMessengerActions({
       setKeyVersion((value) => value + 1);
       setSyncNonce((value) => value + 1);
     });
-  }, [displayName, login, requireWallet, run, wait]);
+  }, [displayName, login, requireActionContext, run, wait]);
 
   const handleCreateChat = useCallback(async () => {
     await run("create chat", async () => {
