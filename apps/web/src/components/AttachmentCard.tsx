@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import {
   MAX_CACHED_ATTACHMENT_SIZE_BYTES,
   cacheAttachmentFromIpfs,
-} from "../lib/ipfs/attachmentCache";
-import { decryptFileBlob } from "../lib/ipfs/fileCrypto";
-import { downloadIpfsUrl } from "../lib/ipfs/localIpfs";
+} from "@mantle/messenger-core/ipfs/attachmentCache";
+import { decryptFileBlob } from "@mantle/messenger-core/ipfs/fileCrypto";
+import { downloadIpfsUrl } from "@mantle/messenger-core/ipfs/localIpfs";
 import type {
   LocalAttachmentFile,
   LocalMessageAttachment,
-} from "../lib/db";
+} from "@mantle/messenger-core/db";
 
 type AttachmentCardProps = {
   attachment: LocalMessageAttachment;

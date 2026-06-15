@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { config } from "./lib/wagmi";
+import { config } from "@mantle/messenger-core/wagmi";
 import App from "./App";
 import "./style.css";
 

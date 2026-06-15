@@ -12,7 +12,7 @@ import { ConversationPanel } from "./components/ConversationPanel";
 import { DebugPanel } from "./components/DebugPanel";
 import { DetailsPanel } from "./components/DetailsPanel";
 
-import { normalizeAddress } from "./lib/db";
+import { normalizeAddress } from "@mantle/messenger-core/db";
 import { useAppWallet } from "./hooks/useAppWallet";
 import { useBlockchainSyncer } from "./hooks/useBlockchainSyncer";
 import { useMessengerData } from "./hooks/useMessengerData";

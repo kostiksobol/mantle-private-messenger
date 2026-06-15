@@ -7,8 +7,8 @@ import {
   usePublicClient,
 } from "wagmi";
 
-import { normalizeAddress } from "../lib/db";
-import { appChain } from "../lib/wagmi";
+import { normalizeAddress } from "@mantle/messenger-core/db";
+import { appChain } from "@mantle/messenger-core/wagmi";
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;

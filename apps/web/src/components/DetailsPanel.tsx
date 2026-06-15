@@ -1,8 +1,8 @@
-import { normalizeAddress } from "../lib/db";
+import { normalizeAddress } from "@mantle/messenger-core/db";
 import { initials, shortAddress } from "./format";
 import { IpfsStatusBox } from "./IpfsStatusBox";
 import type { ChatMember, KnownUser, LocalChat } from "./types";
-import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
+import type { LocalIpfsStatus } from "@mantle/messenger-core/ipfs/localIpfs";
 
 type DetailsPanelProps = {
   selectedChat?: LocalChat;

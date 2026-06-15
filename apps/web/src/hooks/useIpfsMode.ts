@@ -4,7 +4,7 @@ import {
   DEFAULT_LOCAL_IPFS_API_URL,
   checkLocalIpfs,
   type LocalIpfsStatus,
-} from "../lib/ipfs/localIpfs";
+} from "@mantle/messenger-core/ipfs/localIpfs";
 
 const IPFS_ENABLED_STORAGE_KEY = "mantle-private-messenger:ipfs-enabled";
 

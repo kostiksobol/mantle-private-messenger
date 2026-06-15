@@ -30,7 +30,7 @@ import {
   encodePayload,
   type MessageAttachmentPayload,
 } from "../protocol/payloads";
-import type { LocalChat, SelfProfile } from "../../components/types";
+import type { LocalChat, SelfProfile } from "../db";
 
 export type ChainUser = {
   userAddress: Address;

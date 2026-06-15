@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
-import { db, normalizeAddress } from "../lib/db";
+import { db, normalizeAddress } from "@mantle/messenger-core/db";
 import type {
   ChatMember,
   ChatWithPreview,

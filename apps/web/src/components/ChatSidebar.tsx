@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { normalizeAddress } from "../lib/db";
+import { normalizeAddress } from "@mantle/messenger-core/db";
 import { formatTime, initials, shortAddress } from "./format";
 import type { ChatWithPreview, KnownUser, SelfProfile } from "./types";
 

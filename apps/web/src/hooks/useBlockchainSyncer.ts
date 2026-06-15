@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-import { MAIN_CONNECTOR_ADDRESS } from "../lib/contracts";
-import { startBlockchainSyncer } from "../lib/syncer";
+import { MAIN_CONNECTOR_ADDRESS } from "@mantle/messenger-core/contracts";
+import { startBlockchainSyncer } from "@mantle/messenger-core/syncer";
 
 type StartSyncerArgs = Parameters<typeof startBlockchainSyncer>[0];
 

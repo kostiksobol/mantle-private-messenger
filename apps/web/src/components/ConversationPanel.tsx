@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { RefObject } from "react";
 
-import { db, normalizeAddress } from "../lib/db";
+import { db, normalizeAddress } from "@mantle/messenger-core/db";
 import { formatTime, shortAddress } from "./format";
 import { AttachmentCard } from "./AttachmentCard";
 import type { ChatMember, KnownUser, LocalChat, LocalMessage } from "./types";
-import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
+import type { LocalIpfsStatus } from "@mantle/messenger-core/ipfs/localIpfs";
 
 type ConversationPanelProps = {
   selectedChat?: LocalChat;

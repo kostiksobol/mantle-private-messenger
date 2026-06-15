@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { LocalIpfsStatus } from "../lib/ipfs/localIpfs";
+import type { LocalIpfsStatus } from "@mantle/messenger-core/ipfs/localIpfs";
 
 type IpfsStatusBoxProps = {
   status: LocalIpfsStatus;

@@ -1,19 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Address, Hash } from "viem";
 
-import { db } from "../lib/db";
-import { ensureRsaKeyPair, loadRsaKeyPair } from "../lib/localKeys";
+import { db } from "@mantle/messenger-core/db";
+import { ensureRsaKeyPair, loadRsaKeyPair } from "@mantle/messenger-core/localKeys";
 import {
   MAIN_CONNECTOR_ADDRESS,
   mainConnectorAbi,
-} from "../lib/contracts";
-import { appChain } from "../lib/wagmi";
+} from "@mantle/messenger-core/contracts";
+import { appChain } from "@mantle/messenger-core/wagmi";
 import {
   createChat,
   inviteChatMember,
   sendChatMessage,
   type MessengerWriteContext,
-} from "../lib/messenger/writeActions";
+} from "@mantle/messenger-core/messenger/writeActions";
 import type { LocalChat, SelfProfile } from "../components/types";
 
 type UseMessengerActionsArgs = {
