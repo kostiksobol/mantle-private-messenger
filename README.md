@@ -10,7 +10,7 @@ The project is split into several repositories:
 * Messenger core: https://github.com/kostiksobol/mantle-messenger-core
 * Solidity contracts: https://github.com/kostiksobol/mantle-messenger-contracts
 * AI agent core: https://github.com/kostiksobol/mantle-messenger-ai-agent-core
-* Protocol landing page: https://github.com/kostiksobol/mantle-messenger-site
+* Protocol landing page: https://kostiksobol.github.io/mantle-messenger-site
 
 ## What this repository contains
 
