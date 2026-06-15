@@ -21,10 +21,11 @@ import { useBlockchainSyncer } from "./hooks/useBlockchainSyncer";
 import { useMessengerData } from "./hooks/useMessengerData";
 import { useMessengerActions } from "./hooks/useMessengerActions";
 import { useIpfsMode } from "./hooks/useIpfsMode";
+import { useIdentityRegistry } from "./hooks/useIdentityRegistry";
+import { useIdentityBalances } from "./hooks/useIdentityBalances";
 
 import {
   createLocalSignerAccount,
-  deleteLocalSignerAccount,
   listLocalSignerAccounts,
   type LocalSignerAccount,
 } from "./identity/localSignerAccounts";
@@ -32,12 +33,15 @@ import {
   createBrowserWalletTransactions,
   createLocalSignerTransactions,
 } from "./identity/transactions";
+import type { WalletAccountInfo } from "./hooks/useAppWallet";
 
 type ActiveIdentity =
   | {
       id: string;
       kind: "wallet";
       address: Address;
+      providerId: string;
+      providerName: string;
     }
   | {
       id: string;
@@ -46,8 +50,8 @@ type ActiveIdentity =
       address: Address;
     };
 
-function walletIdentityId(address: Address) {
-  return `wallet:${normalizeAddress(address)}`;
+function walletIdentityId(account: Pick<WalletAccountInfo, "providerId" | "address">) {
+  return `wallet:${account.providerId}:${normalizeAddress(account.address)}`;
 }
 
 function localIdentityId(id: string) {
@@ -57,22 +61,20 @@ function localIdentityId(id: string) {
 export default function App() {
   const {
     appChain,
-    isConnected,
-    chainId,
-    wrongNetwork,
-    connectors,
-    connect,
-    isConnecting,
-    disconnect,
-    publicClient,
+    walletProviders,
     walletAccounts,
+    connectingProviderId,
+    publicClient,
+    connectWalletProvider,
     createWalletClientForAddress,
+    getProviderChainId,
     refreshWalletAccounts,
-    switchToAppChain,
+    switchProviderToAppChain,
   } = useAppWallet();
 
   const [localAccountsVersion, setLocalAccountsVersion] = useState(0);
   const [activeIdentityId, setActiveIdentityId] = useState("");
+  const [selectedWalletChainId, setSelectedWalletChainId] = useState<number>();
 
   const localAccounts = useMemo(() => {
     return listLocalSignerAccounts();
@@ -84,18 +86,20 @@ export default function App() {
     }
 
     if (activeIdentityId.startsWith("wallet:")) {
-      const address = walletAccounts.find(
+      const account = walletAccounts.find(
         (item) => walletIdentityId(item) === activeIdentityId
       );
 
-      if (!address) {
+      if (!account) {
         return undefined;
       }
 
       return {
         id: activeIdentityId,
         kind: "wallet",
-        address,
+        address: account.address,
+        providerId: account.providerId,
+        providerName: account.providerName,
       };
     }
 
@@ -120,13 +124,58 @@ export default function App() {
 
   const ownerAddress = activeIdentity?.address;
 
+  const identityAddresses = useMemo(() => {
+    return [
+      ...walletAccounts.map((account) => account.address),
+      ...localAccounts.map((account) => account.address),
+    ];
+  }, [localAccounts, walletAccounts]);
+
+  const identityProfilesByAddress = useIdentityRegistry({
+    publicClient,
+    addresses: identityAddresses,
+  });
+
+  const identityBalancesByAddress = useIdentityBalances({
+    publicClient,
+    addresses: identityAddresses,
+    decimals: appChain.nativeCurrency.decimals,
+    symbol: appChain.nativeCurrency.symbol,
+  });
+
+  useEffect(() => {
+    if (!activeIdentity || activeIdentity.kind !== "wallet") {
+      setSelectedWalletChainId(undefined);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function readChainId() {
+      const chainId = await getProviderChainId(activeIdentity.providerId);
+
+      if (!cancelled) {
+        setSelectedWalletChainId(chainId);
+      }
+    }
+
+    void readChainId();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeIdentity, getProviderChainId]);
+
   const selectedWalletClient = useMemo(() => {
     if (!activeIdentity || activeIdentity.kind !== "wallet") {
       return undefined;
     }
 
     try {
-      return createWalletClientForAddress(activeIdentity.address);
+      return createWalletClientForAddress(
+        activeIdentity.address,
+        activeIdentity.providerId
+      );
     } catch {
       return undefined;
     }
@@ -209,7 +258,6 @@ export default function App() {
     busy,
     activity,
     addActivity,
-    handleEnsureKeys,
     handleRegister,
     handleCreateChat,
     handleSendMessage,
@@ -290,55 +338,51 @@ export default function App() {
       <UsersPage
         appChainName={appChain.name}
         appChainId={appChain.id}
-        isWalletConnected={isConnected}
+        walletProviders={walletProviders}
         walletAccounts={walletAccounts}
-        walletConnectDisabled={!connectors[0] || isConnecting}
-        walletConnecting={isConnecting}
+        registeredProfiles={identityProfilesByAddress}
+        balances={identityBalancesByAddress}
+        connectingProviderId={connectingProviderId}
         localAccounts={localAccounts}
-        onConnectWallet={() => {
-          if (connectors[0]) {
-            connect({ connector: connectors[0] });
-          }
+        onConnectWalletProvider={(providerId) => {
+          void connectWalletProvider(providerId);
         }}
         onRefreshWalletAccounts={() => {
           void refreshWalletAccounts();
         }}
-        onSelectWalletAccount={(address) => {
-          setActiveIdentityId(walletIdentityId(address));
+        onSelectWalletAccount={(account) => {
+          setActiveIdentityId(walletIdentityId(account));
         }}
         onCreateLocalAccount={() => {
-          const account = createLocalSignerAccount();
+          createLocalSignerAccount();
           setLocalAccountsVersion((value) => value + 1);
-          setActiveIdentityId(localIdentityId(account.id));
         }}
         onSelectLocalAccount={(account) => {
           setActiveIdentityId(localIdentityId(account.id));
-        }}
-        onDeleteLocalAccount={(id) => {
-          deleteLocalSignerAccount(id);
-          setLocalAccountsVersion((value) => value + 1);
-
-          if (activeIdentityId === localIdentityId(id)) {
-            setActiveIdentityId("");
-          }
         }}
       />
     );
   }
 
-  if (activeIdentity.kind === "wallet" && wrongNetwork) {
+  const walletWrongNetwork =
+    activeIdentity.kind === "wallet" &&
+    selectedWalletChainId !== undefined &&
+    selectedWalletChainId !== appChain.id;
+
+  if (activeIdentity.kind === "wallet" && walletWrongNetwork) {
     return (
       <WrongNetworkScreen
-        currentChainId={chainId}
+        currentChainId={selectedWalletChainId}
         appChainName={appChain.name}
         appChainId={appChain.id}
         onSwitchNetwork={async () => {
-          await switchToAppChain();
-          window.location.reload();
+          await switchProviderToAppChain(activeIdentity.providerId);
+          setSelectedWalletChainId(
+            await getProviderChainId(activeIdentity.providerId)
+          );
         }}
         onDisconnect={() => {
           setActiveIdentityId("");
-          disconnect();
         }}
       />
     );
@@ -346,36 +390,33 @@ export default function App() {
 
   if (!selfProfile || !rsaKeys) {
     return (
-      <OnboardingScreen
-        ownerAddress={ownerAddress}
-        appChainName={appChain.name}
-        rsaReady={Boolean(rsaKeys)}
-        login={login}
-        displayName={displayName}
-        busy={busy}
-        activity={activity}
-        onLoginChange={setLogin}
-        onDisplayNameChange={setDisplayName}
-        onEnsureKeys={handleEnsureKeys}
-        onRegister={handleRegister}
-        onDisconnect={() => {
-          setActiveIdentityId("");
-        }}
-      />
+      <>
+        <button
+          className="registrationBackButton"
+          onClick={() => {
+            setActiveIdentityId("");
+          }}
+        >
+          ← Back to users
+        </button>
+
+        <OnboardingScreen
+          ownerAddress={ownerAddress}
+          appChainName={appChain.name}
+          rsaReady={Boolean(rsaKeys)}
+          login={login}
+          displayName={displayName}
+          busy={busy}
+          onLoginChange={setLogin}
+          onDisplayNameChange={setDisplayName}
+          onRegister={handleRegister}
+        />
+      </>
     );
   }
 
   return (
     <main className="messengerShell">
-      <button
-        className="usersBackButton"
-        onClick={() => {
-          setActiveIdentityId("");
-        }}
-      >
-        ← Users
-      </button>
-
       <ChatSidebar
         selfProfile={selfProfile}
         ownerAddress={ownerAddress}

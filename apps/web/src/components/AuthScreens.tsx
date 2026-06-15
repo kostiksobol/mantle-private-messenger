@@ -43,7 +43,6 @@ type WrongNetworkScreenProps = {
   appChainName: string;
   appChainId: number;
   onSwitchNetwork: () => Promise<void>;
-  onDisconnect: () => void;
 };
 
 export function WrongNetworkScreen({
@@ -51,7 +50,6 @@ export function WrongNetworkScreen({
   appChainName,
   appChainId,
   onSwitchNetwork,
-  onDisconnect,
 }: WrongNetworkScreenProps) {
   return (
     <main className="authPage">
@@ -74,9 +72,7 @@ export function WrongNetworkScreen({
           Switch network
         </button>
 
-        <button className="ghostButton full" onClick={onDisconnect}>
-          Disconnect
-        </button>
+
       </section>
     </main>
   );
@@ -89,12 +85,9 @@ type OnboardingScreenProps = {
   login: string;
   displayName: string;
   busy: boolean;
-  activity: string[];
   onLoginChange: (value: string) => void;
   onDisplayNameChange: (value: string) => void;
-  onEnsureKeys: () => Promise<void>;
   onRegister: () => Promise<void>;
-  onDisconnect: () => void;
 };
 
 export function OnboardingScreen({
@@ -104,12 +97,9 @@ export function OnboardingScreen({
   login,
   displayName,
   busy,
-  activity,
   onLoginChange,
   onDisplayNameChange,
-  onEnsureKeys,
   onRegister,
-  onDisconnect,
 }: OnboardingScreenProps) {
   return (
     <main className="authPage">
@@ -140,36 +130,19 @@ export function OnboardingScreen({
           onChange={(event) => onDisplayNameChange(event.target.value)}
         />
 
-        <div className="splitButtons">
-          <button
-            disabled={busy}
-            onClick={() => {
-              void onEnsureKeys();
-            }}
-          >
-            Ensure RSA
-          </button>
-
-          <button
-            className="primaryButton"
-            disabled={busy || !login.trim()}
-            onClick={() => {
-              void onRegister();
-            }}
-          >
-            Register
-          </button>
-        </div>
-
-        <button className="ghostButton full" onClick={onDisconnect}>
-          Disconnect
+        <button
+          className="primaryButton full"
+          disabled={busy || !login.trim()}
+          onClick={() => {
+            void onRegister();
+          }}
+        >
+          Register
         </button>
 
-        <div className="miniActivity">
-          {activity.slice(0, 6).map((item, index) => (
-            <div key={`${item}-${index}`}>{item}</div>
-          ))}
-        </div>
+
+
+
       </section>
     </main>
   );
