@@ -1,48 +1,20 @@
 import { useCallback, useMemo, useState } from "react";
-import { encodeFunctionData, type Address, type Hash } from "viem";
+import type { Address, Hash } from "viem";
 
-import { aesEncrypt } from "../lib/crypto/aes";
-import {
-  deriveChatId,
-  generateChatKey,
-  generateMessageTag,
-} from "../lib/crypto/hmac";
-import { rsaEncrypt } from "../lib/crypto/rsa";
-import { encryptFileBlob } from "../lib/ipfs/fileCrypto";
-import { checkLocalIpfs, uploadBlobToLocalIpfs } from "../lib/ipfs/localIpfs";
-import {
-  MAX_CACHED_ATTACHMENT_SIZE_BYTES,
-  putCachedAttachmentFile,
-} from "../lib/ipfs/attachmentCache";
-import { db, normalizeAddress } from "../lib/db";
+import { db } from "../lib/db";
 import { ensureRsaKeyPair, loadRsaKeyPair } from "../lib/localKeys";
 import {
   MAIN_CONNECTOR_ADDRESS,
-  ZERO_ADDRESS,
   mainConnectorAbi,
-  userContractAbi,
 } from "../lib/contracts";
 import { appChain } from "../lib/wagmi";
-import { tryWalletSendCallsBatch } from "../lib/walletBatch";
 import {
-  createChatCreationPayload,
-  createInvitationPayload,
-  createMainInvitationPayload,
-  createMessagePayload,
-  encodePayload,
-} from "../lib/protocol/payloads";
+  createChat,
+  inviteChatMember,
+  sendChatMessage,
+  type MessengerWriteContext,
+} from "../lib/messenger/writeActions";
 import type { LocalChat, SelfProfile } from "../components/types";
-import type { MessageAttachmentPayload } from "../lib/protocol/payloads";
-
-type ChainUser = {
-  userAddress: Address;
-  login: string;
-  name: string;
-  pubkey: string;
-  userContract: Address;
-  kind: number;
-  metadataURI: string;
-};
 
 type UseMessengerActionsArgs = {
   ownerAddress?: Address;
@@ -61,46 +33,6 @@ type UseMessengerActionsArgs = {
   onMessageTextChange: (value: string) => void;
   onInviteTargetChange: (value: string) => void;
 };
-
-function chainUserFrom(value: unknown): ChainUser {
-  const item = value as Partial<ChainUser> & Record<number, unknown>;
-
-  return {
-    userAddress: (item.userAddress ?? item[0]) as Address,
-    login: String(item.login ?? item[1] ?? ""),
-    name: String(item.name ?? item[2] ?? ""),
-    pubkey: String(item.pubkey ?? item[3] ?? ""),
-    userContract: (item.userContract ?? item[4]) as Address,
-    kind: Number(item.kind ?? item[5] ?? 0),
-    metadataURI: String(item.metadataURI ?? item[6] ?? ""),
-  };
-}
-
-function toAddress(address: string) {
-  return normalizeAddress(address) as Address;
-}
-
-function isZeroAddress(address: string) {
-  return normalizeAddress(address) === ZERO_ADDRESS;
-}
-
-async function uploadFileAttachment(
-  chatKey: string,
-  file: File
-): Promise<MessageAttachmentPayload> {
-  const encryptedFile = await encryptFileBlob(chatKey, file);
-  const uploaded = await uploadBlobToLocalIpfs(encryptedFile.blob);
-
-  return {
-    url: uploaded.url,
-    name: file.name || "attachment",
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    iv: encryptedFile.iv,
-    encryptedSize: uploaded.encryptedSize,
-  };
-}
-
 
 export function useMessengerActions({
   ownerAddress,
@@ -193,49 +125,22 @@ export function useMessengerActions({
     [requireWallet]
   );
 
-  const readUserByAddress = useCallback(
-    async (userAddress: Address) => {
-      const wallet = requireWallet();
+  const makeWriteContext = useCallback((): MessengerWriteContext => {
+    const wallet = requireWallet();
 
-      const user = chainUserFrom(
-        await wallet.publicClient.readContract({
-          address: wallet.mainConnectorAddress,
-          abi: mainConnectorAbi,
-          functionName: "getUserByAddress",
-          args: [userAddress],
-        })
-      );
+    if (!selfProfile) {
+      throw new Error("Register first");
+    }
 
-      if (isZeroAddress(user.userAddress)) {
-        return undefined;
-      }
-
-      return user;
-    },
-    [requireWallet]
-  );
-
-  const readUserByLogin = useCallback(
-    async (userLogin: string) => {
-      const wallet = requireWallet();
-
-      const user = chainUserFrom(
-        await wallet.publicClient.readContract({
-          address: wallet.mainConnectorAddress,
-          abi: mainConnectorAbi,
-          functionName: "getUserByLogin",
-          args: [userLogin],
-        })
-      );
-
-      if (isZeroAddress(user.userAddress)) {
-        return undefined;
-      }
-
-      return user;
-    },
-    [requireWallet]
-  );
+    return {
+      ownerAddress: wallet.ownerAddress,
+      publicClient: wallet.publicClient,
+      walletClient: wallet.walletClient,
+      selfProfile,
+      mainConnectorAddress: wallet.mainConnectorAddress,
+      addActivity,
+    };
+  }, [addActivity, requireWallet, selfProfile]);
 
   const handleEnsureKeys = useCallback(async () => {
     await run("ensure RSA keys", async () => {
@@ -281,287 +186,65 @@ export function useMessengerActions({
 
   const handleCreateChat = useCallback(async () => {
     await run("create chat", async () => {
-      const wallet = requireWallet();
-
-      if (!selfProfile) {
-        throw new Error("Register first");
-      }
-
-      const keys = await ensureRsaKeyPair(wallet.ownerAddress);
-
-      const chatKey = generateChatKey();
-      const chatId = await deriveChatId(chatKey);
-
-      const creationBox = await aesEncrypt(
-        chatKey,
-        encodePayload(
-          createChatCreationPayload({
-            name: chatName.trim() || "Unnamed chat",
-          })
-        )
-      );
-
-      const creationTag = await generateMessageTag(chatKey);
-
-      const mainInvitation = await rsaEncrypt(
-        keys.publicKey,
-        encodePayload(
-          createMainInvitationPayload({
-            chatKey,
-            creator: wallet.ownerAddress,
-          })
-        )
-      );
-
-      const batched = await tryWalletSendCallsBatch({
-        from: wallet.ownerAddress,
-        chainId: appChain.id,
-        calls: [
-          {
-            to: selfProfile.userContract as Address,
-            data: encodeFunctionData({
-              abi: userContractAbi,
-              functionName: "addMessage",
-              args: [creationBox, creationTag],
-            }),
-          },
-          {
-            to: wallet.mainConnectorAddress,
-            data: encodeFunctionData({
-              abi: mainConnectorAbi,
-              functionName: "addRecord",
-              args: [mainInvitation],
-            }),
-          },
-        ],
+      const result = await createChat(makeWriteContext(), {
+        name: chatName,
       });
 
-      if (!batched) {
-        const creationHash = await wallet.walletClient.writeContract({
-          account: wallet.ownerAddress,
-          chain: appChain,
-          address: selfProfile.userContract as Address,
-          abi: userContractAbi,
-          functionName: "addMessage",
-          args: [creationBox, creationTag],
-        });
-
-        await wait(creationHash);
-
-        const recordHash = await wallet.walletClient.writeContract({
-          account: wallet.ownerAddress,
-          chain: appChain,
-          address: wallet.mainConnectorAddress,
-          abi: mainConnectorAbi,
-          functionName: "addRecord",
-          args: [mainInvitation],
-        });
-
-        await wait(recordHash);
-      }
-
       onChatNameChange("");
-      onSelectedChatIdChange(chatId);
+      onSelectedChatIdChange(result.chatId);
       setSyncNonce((value) => value + 1);
     });
   }, [
     chatName,
+    makeWriteContext,
     onChatNameChange,
     onSelectedChatIdChange,
-    requireWallet,
     run,
-    selfProfile,
-    wait,
   ]);
 
   const handleSendMessage = useCallback(async (attachmentFiles: File[] = []) => {
     await run("send message", async () => {
-      const wallet = requireWallet();
-
-      if (!selfProfile) {
-        throw new Error("Register first");
-      }
-
       if (!selectedChat) {
         throw new Error("Select chat");
       }
 
-      const text = messageText.trim();
-      const files = attachmentFiles.filter((file) => file.size > 0);
-
-      if (!text && files.length === 0) {
-        throw new Error("Message is empty");
-      }
-
-      if (files.length > 0) {
-        const ipfsStatus = await checkLocalIpfs();
-
-        if (ipfsStatus.state !== "connected") {
-          throw new Error("Connect IPFS before sending files");
-        }
-      }
-
-      const attachments: MessageAttachmentPayload[] = [];
-
-      for (const file of files) {
-        addActivity(`upload file: ${file.name || "attachment"}`);
-
-        const attachment = await uploadFileAttachment(selectedChat.chatKey, file);
-
-        attachments.push(attachment);
-
-        if (ownerAddress && file.size <= MAX_CACHED_ATTACHMENT_SIZE_BYTES) {
-          await putCachedAttachmentFile({
-            ownerAddress,
-            chatId: selectedChat.chatId,
-            attachment,
-            blob: file,
-          });
-        }
-      }
-
-      const encrypted = await aesEncrypt(
-        selectedChat.chatKey,
-        encodePayload(
-          createMessagePayload(text, attachments)
-        )
-      );
-
-      const tag = await generateMessageTag(selectedChat.chatKey);
-
-      const hash = await wallet.walletClient.writeContract({
-        account: wallet.ownerAddress,
-        chain: appChain,
-        address: selfProfile.userContract as Address,
-        abi: userContractAbi,
-        functionName: "addMessage",
-        args: [encrypted, tag],
+      await sendChatMessage(makeWriteContext(), {
+        chat: selectedChat,
+        text: messageText,
+        files: attachmentFiles,
       });
-
-      await wait(hash);
 
       onMessageTextChange("");
       setSyncNonce((value) => value + 1);
     });
   }, [
-    addActivity,
+    makeWriteContext,
     messageText,
     onMessageTextChange,
-    requireWallet,
     run,
     selectedChat,
-    selfProfile,
-    wait,
   ]);
 
   const handleInvite = useCallback(async () => {
     await run("invite user", async () => {
-      const wallet = requireWallet();
-
-      if (!selfProfile) {
-        throw new Error("Register first");
-      }
-
       if (!selectedChat) {
         throw new Error("Select chat");
       }
 
-      const target = inviteTarget.trim();
-
-      if (!target) {
-        throw new Error("Invite target is empty");
-      }
-
-      const invitedUser =
-        target.startsWith("0x") && target.length === 42
-          ? await readUserByAddress(toAddress(target))
-          : await readUserByLogin(target);
-
-      if (!invitedUser) {
-        throw new Error("User not found");
-      }
-
-      const invitationEvent = await aesEncrypt(
-        selectedChat.chatKey,
-        encodePayload(
-          createInvitationPayload({
-            invited: toAddress(invitedUser.userAddress),
-          })
-        )
-      );
-
-      const invitationTag = await generateMessageTag(selectedChat.chatKey);
-
-      const mainInvitation = await rsaEncrypt(
-        invitedUser.pubkey,
-        encodePayload(
-          createMainInvitationPayload({
-            chatKey: selectedChat.chatKey,
-            creator: toAddress(selectedChat.creatorAddress),
-          })
-        )
-      );
-
-      const batched = await tryWalletSendCallsBatch({
-        from: wallet.ownerAddress,
-        chainId: appChain.id,
-        calls: [
-          {
-            to: wallet.mainConnectorAddress,
-            data: encodeFunctionData({
-              abi: mainConnectorAbi,
-              functionName: "addRecord",
-              args: [mainInvitation],
-            }),
-          },
-          {
-            to: selfProfile.userContract as Address,
-            data: encodeFunctionData({
-              abi: userContractAbi,
-              functionName: "addMessage",
-              args: [invitationEvent, invitationTag],
-            }),
-          },
-        ],
+      await inviteChatMember(makeWriteContext(), {
+        chat: selectedChat,
+        target: inviteTarget,
       });
-
-      if (!batched) {
-        const recordHash = await wallet.walletClient.writeContract({
-          account: wallet.ownerAddress,
-          chain: appChain,
-          address: wallet.mainConnectorAddress,
-          abi: mainConnectorAbi,
-          functionName: "addRecord",
-          args: [mainInvitation],
-        });
-
-        await wait(recordHash);
-
-        const messageHash = await wallet.walletClient.writeContract({
-          account: wallet.ownerAddress,
-          chain: appChain,
-          address: selfProfile.userContract as Address,
-          abi: userContractAbi,
-          functionName: "addMessage",
-          args: [invitationEvent, invitationTag],
-        });
-
-        await wait(messageHash);
-      }
 
       onInviteTargetChange("");
       setSyncNonce((value) => value + 1);
     });
   }, [
     inviteTarget,
+    makeWriteContext,
     onInviteTargetChange,
-    readUserByAddress,
-    readUserByLogin,
-    requireWallet,
     run,
     selectedChat,
-    selfProfile,
-    wait,
   ]);
 
   const handleDeleteIndexedDb = useCallback(async () => {
