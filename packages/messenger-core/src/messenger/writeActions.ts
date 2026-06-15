@@ -20,8 +20,6 @@ import {
   mainConnectorAbi,
   userContractAbi,
 } from "../contracts";
-import { appChain } from "../wagmi";
-import { tryWalletSendCallsBatch } from "../walletBatch";
 import {
   createChatCreationPayload,
   createInvitationPayload,
@@ -31,6 +29,7 @@ import {
   type MessageAttachmentPayload,
 } from "../protocol/payloads";
 import type { LocalChat, SelfProfile } from "../db";
+import type { MessengerTransactionLayer } from "../chain/transactionLayer";
 
 export type ChainUser = {
   userAddress: Address;
@@ -45,9 +44,9 @@ export type ChainUser = {
 export type MessengerWriteContext = {
   ownerAddress: Address;
   publicClient: any;
-  walletClient: any;
+  transactions: MessengerTransactionLayer;
   selfProfile: SelfProfile;
-  mainConnectorAddress?: Address;
+  mainConnectorAddress: Address;
   addActivity?: (message: string) => void;
 };
 
@@ -93,14 +92,6 @@ function isZeroAddress(address: string) {
   return normalizeAddress(address) === ZERO_ADDRESS;
 }
 
-function requireMainConnectorAddress(ctx: MessengerWriteContext) {
-  if (!ctx.mainConnectorAddress) {
-    throw new Error("MainConnector address is not configured");
-  }
-
-  return ctx.mainConnectorAddress;
-}
-
 async function wait(ctx: MessengerWriteContext, hash: Hash) {
   await ctx.publicClient.waitForTransactionReceipt({ hash });
 }
@@ -109,11 +100,9 @@ async function readUserByAddress(
   ctx: MessengerWriteContext,
   userAddress: Address
 ) {
-  const mainConnectorAddress = requireMainConnectorAddress(ctx);
-
   const user = chainUserFrom(
     await ctx.publicClient.readContract({
-      address: mainConnectorAddress,
+      address: ctx.mainConnectorAddress,
       abi: mainConnectorAbi,
       functionName: "getUserByAddress",
       args: [userAddress],
@@ -128,11 +117,9 @@ async function readUserByAddress(
 }
 
 async function readUserByLogin(ctx: MessengerWriteContext, userLogin: string) {
-  const mainConnectorAddress = requireMainConnectorAddress(ctx);
-
   const user = chainUserFrom(
     await ctx.publicClient.readContract({
-      address: mainConnectorAddress,
+      address: ctx.mainConnectorAddress,
       abi: mainConnectorAbi,
       functionName: "getUserByLogin",
       args: [userLogin],
@@ -167,7 +154,6 @@ export async function createChat(
   ctx: MessengerWriteContext,
   input: CreateChatInput
 ): Promise<CreateChatResult> {
-  const mainConnectorAddress = requireMainConnectorAddress(ctx);
   const keys = await ensureRsaKeyPair(ctx.ownerAddress);
 
   const chatKey = generateChatKey();
@@ -194,10 +180,8 @@ export async function createChat(
     )
   );
 
-  const batched = await tryWalletSendCallsBatch({
-    from: ctx.ownerAddress,
-    chainId: appChain.id,
-    calls: [
+  const batched =
+    (await ctx.transactions.sendCallsBatch?.([
       {
         to: ctx.selfProfile.userContract as Address,
         data: encodeFunctionData({
@@ -207,20 +191,17 @@ export async function createChat(
         }),
       },
       {
-        to: mainConnectorAddress,
+        to: ctx.mainConnectorAddress,
         data: encodeFunctionData({
           abi: mainConnectorAbi,
           functionName: "addRecord",
           args: [mainInvitation],
         }),
       },
-    ],
-  });
+    ])) ?? false;
 
   if (!batched) {
-    const creationHash = await ctx.walletClient.writeContract({
-      account: ctx.ownerAddress,
-      chain: appChain,
+    const creationHash = await ctx.transactions.writeContract({
       address: ctx.selfProfile.userContract as Address,
       abi: userContractAbi,
       functionName: "addMessage",
@@ -229,10 +210,8 @@ export async function createChat(
 
     await wait(ctx, creationHash);
 
-    const recordHash = await ctx.walletClient.writeContract({
-      account: ctx.ownerAddress,
-      chain: appChain,
-      address: mainConnectorAddress,
+    const recordHash = await ctx.transactions.writeContract({
+      address: ctx.mainConnectorAddress,
       abi: mainConnectorAbi,
       functionName: "addRecord",
       args: [mainInvitation],
@@ -292,9 +271,7 @@ export async function sendChatMessage(
 
   const tag = await generateMessageTag(input.chat.chatKey);
 
-  const hash = await ctx.walletClient.writeContract({
-    account: ctx.ownerAddress,
-    chain: appChain,
+  const hash = await ctx.transactions.writeContract({
     address: ctx.selfProfile.userContract as Address,
     abi: userContractAbi,
     functionName: "addMessage",
@@ -308,7 +285,6 @@ export async function inviteChatMember(
   ctx: MessengerWriteContext,
   input: InviteChatMemberInput
 ) {
-  const mainConnectorAddress = requireMainConnectorAddress(ctx);
   const target = input.target.trim();
 
   if (!target) {
@@ -345,12 +321,10 @@ export async function inviteChatMember(
     )
   );
 
-  const batched = await tryWalletSendCallsBatch({
-    from: ctx.ownerAddress,
-    chainId: appChain.id,
-    calls: [
+  const batched =
+    (await ctx.transactions.sendCallsBatch?.([
       {
-        to: mainConnectorAddress,
+        to: ctx.mainConnectorAddress,
         data: encodeFunctionData({
           abi: mainConnectorAbi,
           functionName: "addRecord",
@@ -365,14 +339,11 @@ export async function inviteChatMember(
           args: [invitationEvent, invitationTag],
         }),
       },
-    ],
-  });
+    ])) ?? false;
 
   if (!batched) {
-    const recordHash = await ctx.walletClient.writeContract({
-      account: ctx.ownerAddress,
-      chain: appChain,
-      address: mainConnectorAddress,
+    const recordHash = await ctx.transactions.writeContract({
+      address: ctx.mainConnectorAddress,
       abi: mainConnectorAbi,
       functionName: "addRecord",
       args: [mainInvitation],
@@ -380,9 +351,7 @@ export async function inviteChatMember(
 
     await wait(ctx, recordHash);
 
-    const messageHash = await ctx.walletClient.writeContract({
-      account: ctx.ownerAddress,
-      chain: appChain,
+    const messageHash = await ctx.transactions.writeContract({
       address: ctx.selfProfile.userContract as Address,
       abi: userContractAbi,
       functionName: "addMessage",

@@ -14,7 +14,9 @@ import {
   sendChatMessage,
   type MessengerWriteContext,
 } from "@mantle/messenger-core/messenger/writeActions";
+import type { MessengerTransactionLayer } from "@mantle/messenger-core/chain/transactionLayer";
 import type { LocalChat, SelfProfile } from "../components/types";
+import { tryWalletSendCallsBatch } from "../adapters/walletBatch";
 
 type UseMessengerActionsArgs = {
   ownerAddress?: Address;
@@ -125,6 +127,28 @@ export function useMessengerActions({
     [requireWallet]
   );
 
+  const makeTransactionLayer = useCallback((): MessengerTransactionLayer => {
+    const wallet = requireWallet();
+
+    return {
+      writeContract: async (args) => {
+        return wallet.walletClient.writeContract({
+          account: wallet.ownerAddress,
+          chain: appChain,
+          ...args,
+        } as any);
+      },
+
+      sendCallsBatch: async (calls) => {
+        return tryWalletSendCallsBatch({
+          from: wallet.ownerAddress,
+          chainId: appChain.id,
+          calls,
+        });
+      },
+    };
+  }, [requireWallet]);
+
   const makeWriteContext = useCallback((): MessengerWriteContext => {
     const wallet = requireWallet();
 
@@ -135,12 +159,12 @@ export function useMessengerActions({
     return {
       ownerAddress: wallet.ownerAddress,
       publicClient: wallet.publicClient,
-      walletClient: wallet.walletClient,
+      transactions: makeTransactionLayer(),
       selfProfile,
       mainConnectorAddress: wallet.mainConnectorAddress,
       addActivity,
     };
-  }, [addActivity, requireWallet, selfProfile]);
+  }, [addActivity, makeTransactionLayer, requireWallet, selfProfile]);
 
   const handleEnsureKeys = useCallback(async () => {
     await run("ensure RSA keys", async () => {
