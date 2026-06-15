@@ -152,6 +152,10 @@ export default function App() {
     let cancelled = false;
 
     async function readChainId() {
+      if (!activeIdentity || activeIdentity.kind !== "wallet") {
+        return;
+      }
+
       const chainId = await getProviderChainId(activeIdentity.providerId);
 
       if (!cancelled) {
@@ -380,9 +384,6 @@ export default function App() {
           setSelectedWalletChainId(
             await getProviderChainId(activeIdentity.providerId)
           );
-        }}
-        onDisconnect={() => {
-          setActiveIdentityId("");
         }}
       />
     );

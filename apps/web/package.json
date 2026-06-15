@@ -14,16 +14,16 @@
     "dexie": "^4.4.3",
     "dexie-react-hooks": "^4.4.0",
     "kubo-rpc-client": "^7.1.0",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "viem": "^2.52.2",
     "wagmi": "^3.6.16",
-    "@mantle/messenger-core": "file:../../packages/messenger-core"
+    "@mantle/messenger-core": "github:kostiksobol/mantle-messenger-core#main"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.3",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.3.0",

@@ -1,25 +1,31 @@
-node_modules
+# dependencies
+node_modules/
+apps/*/node_modules/
+
+# builds
+dist/
+apps/*/dist/
+
+# foundry / solidity outputs
+out/
+cache/
+broadcast/
+coverage/
+lcov.info
+
+# env
 .env
-.env.local
+.env.*
+!.env.example
 
-# Hardhat
-cache
-artifacts
-coverage
-typechain-types
-
-# Frontend
-dist
-build
-.vite
-
-# OS/editor
+# system/editor
 .DS_Store
-.idea
-.vscode
+.idea/
+.vscode/
 
-# Foundry
-out
-cache
-broadcast
-.deploy/
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

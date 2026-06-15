@@ -173,7 +173,7 @@ export function AttachmentCard({
       try {
         const nextCachedFile = await withTimeout(
           cacheAttachmentFromIpfs({
-            ownerAddress,
+            ownerAddress: ownerAddress || "",
             chatId,
             chatKey,
             attachment,
