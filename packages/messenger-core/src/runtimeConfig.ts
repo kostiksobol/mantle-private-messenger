@@ -23,8 +23,26 @@ export type MessengerRuntimeConfigOverride = {
   appNetwork?: string;
 };
 
+export type SavedMessengerRuntimeContext = {
+  id: string;
+  label: string;
+  rpcUrl: string;
+  mainConnectorAddress: Address;
+  chainId: number;
+  chainName: string;
+  nativeCurrencyName: string;
+  nativeCurrencySymbol: string;
+  nativeCurrencyDecimals: number;
+  appNetwork: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export const MESSENGER_RUNTIME_CONFIG_STORAGE_KEY =
   "mantle-messenger:runtime-config:v1";
+
+export const MESSENGER_RUNTIME_CONTEXTS_STORAGE_KEY =
+  "mantle-messenger:runtime-contexts:v1";
 
 function readStorage(): MessengerRuntimeConfigOverride | undefined {
   if (typeof localStorage === "undefined") {
@@ -52,6 +70,10 @@ function cleanNumber(value: unknown, fallback: number) {
         : Number.NaN;
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isAddress(value: unknown): value is Address {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
 export function getKnownChainMetadata(chainId: number) {
@@ -214,4 +236,109 @@ export function saveMessengerRuntimeConfig(config: MessengerRuntimeConfig) {
 
 export function resetMessengerRuntimeConfig() {
   localStorage.removeItem(MESSENGER_RUNTIME_CONFIG_STORAGE_KEY);
+}
+
+export function makeMessengerRuntimeContextId(args: {
+  rpcUrl: string;
+  mainConnectorAddress: Address;
+  chainId: number;
+}) {
+  return `${args.chainId}:${args.mainConnectorAddress.toLowerCase()}:${args.rpcUrl.trim()}`;
+}
+
+function readSavedContextsRaw(): SavedMessengerRuntimeContext[] {
+  if (typeof localStorage === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = localStorage.getItem(MESSENGER_RUNTIME_CONTEXTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item) => {
+        return (
+          item &&
+          typeof item === "object" &&
+          typeof item.id === "string" &&
+          typeof item.rpcUrl === "string" &&
+          isAddress(item.mainConnectorAddress) &&
+          typeof item.chainId === "number"
+        );
+      })
+      .map((item) => ({
+        id: item.id,
+        label: cleanString(item.label) || `Chain ${item.chainId}`,
+        rpcUrl: cleanString(item.rpcUrl),
+        mainConnectorAddress: item.mainConnectorAddress as Address,
+        chainId: cleanNumber(item.chainId, 31337),
+        chainName: cleanString(item.chainName) || `Unknown chain ${item.chainId}`,
+        nativeCurrencyName: cleanString(item.nativeCurrencyName) || "Ether",
+        nativeCurrencySymbol: cleanString(item.nativeCurrencySymbol) || "ETH",
+        nativeCurrencyDecimals: cleanNumber(item.nativeCurrencyDecimals, 18),
+        appNetwork: cleanString(item.appNetwork) || `chain-${item.chainId}`,
+        createdAt: cleanNumber(item.createdAt, Date.now()),
+        updatedAt: cleanNumber(item.updatedAt, Date.now()),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedContexts(contexts: SavedMessengerRuntimeContext[]) {
+  localStorage.setItem(
+    MESSENGER_RUNTIME_CONTEXTS_STORAGE_KEY,
+    JSON.stringify(contexts)
+  );
+}
+
+export function getSavedMessengerRuntimeContexts() {
+  return readSavedContextsRaw().sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export function saveMessengerRuntimeContext(
+  context: Omit<SavedMessengerRuntimeContext, "id" | "createdAt" | "updatedAt"> &
+    Partial<Pick<SavedMessengerRuntimeContext, "id" | "createdAt" | "updatedAt">>
+) {
+  const now = Date.now();
+
+  const id =
+    context.id ||
+    makeMessengerRuntimeContextId({
+      rpcUrl: context.rpcUrl,
+      mainConnectorAddress: context.mainConnectorAddress,
+      chainId: context.chainId,
+    });
+
+  const existing = readSavedContextsRaw();
+  const previous = existing.find((item) => item.id === id);
+
+  const nextContext: SavedMessengerRuntimeContext = {
+    ...context,
+    id,
+    createdAt: previous?.createdAt || context.createdAt || now,
+    updatedAt: now,
+  };
+
+  writeSavedContexts([
+    nextContext,
+    ...existing.filter((item) => item.id !== id),
+  ]);
+
+  return nextContext;
+}
+
+export function deleteSavedMessengerRuntimeContext(id: string) {
+  writeSavedContexts(readSavedContextsRaw().filter((item) => item.id !== id));
+}
+
+export function applySavedMessengerRuntimeContext(
+  context: SavedMessengerRuntimeContext
+) {
+  saveMessengerRuntimeConfigOverride(context);
+  saveMessengerRuntimeContext(context);
 }

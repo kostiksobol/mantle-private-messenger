@@ -2,11 +2,16 @@ import { useMemo, useState } from "react";
 import { createPublicClient, http, type Address } from "viem";
 
 import {
+  applySavedMessengerRuntimeContext,
+  deleteSavedMessengerRuntimeContext,
   getDefaultMessengerRuntimeConfig,
   getKnownChainMetadata,
   getMessengerRuntimeConfig,
+  getSavedMessengerRuntimeContexts,
   resetMessengerRuntimeConfig,
   saveMessengerRuntimeConfigOverride,
+  saveMessengerRuntimeContext,
+  type SavedMessengerRuntimeContext,
 } from "@mantle/messenger-core/runtimeConfig";
 import {
   ZERO_ADDRESS,
@@ -18,9 +23,30 @@ function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
+function rpcLabel(rpcUrl: string) {
+  try {
+    const url = new URL(rpcUrl);
+    return url.host || rpcUrl;
+  } catch {
+    return rpcUrl;
+  }
+}
+
 function isAddress(value: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
+
+type OkDetection = {
+  status: "ok";
+  chainId: number;
+  chainName: string;
+  nativeCurrencyName: string;
+  nativeCurrencySymbol: string;
+  nativeCurrencyDecimals: number;
+  appNetwork: string;
+  clientVersion?: string;
+  contractMessage: string;
+};
 
 type DetectionState =
   | {
@@ -29,18 +55,7 @@ type DetectionState =
   | {
       status: "checking";
     }
-  | {
-      status: "ok";
-      chainId: number;
-      chainName: string;
-      nativeCurrencyName: string;
-      nativeCurrencySymbol: string;
-      nativeCurrencyDecimals: number;
-      appNetwork: string;
-      clientVersion?: string;
-      contractOk: boolean;
-      contractMessage: string;
-    }
+  | OkDetection
   | {
       status: "error";
       message: string;
@@ -61,28 +76,30 @@ export function DeveloperConfigPanel() {
   const [detection, setDetection] = useState<DetectionState>({
     status: "idle",
   });
+  const [savedContexts, setSavedContexts] = useState(() =>
+    getSavedMessengerRuntimeContexts()
+  );
 
-  async function detect(nextRpcUrl = rpcUrl, nextMain = mainConnectorAddress) {
-    const cleanRpcUrl = nextRpcUrl.trim();
-    const cleanMain = nextMain.trim();
+  async function validateConfig(args: {
+    rpcUrl: string;
+    mainConnectorAddress: string;
+  }): Promise<DetectionState> {
+    const cleanRpcUrl = args.rpcUrl.trim();
+    const cleanMain = args.mainConnectorAddress.trim();
 
     if (!cleanRpcUrl) {
-      setDetection({
+      return {
         status: "error",
         message: "RPC URL is empty.",
-      });
-      return;
+      };
     }
 
     if (cleanMain && !isAddress(cleanMain)) {
-      setDetection({
+      return {
         status: "error",
         message: "MainConnector address is invalid.",
-      });
-      return;
+      };
     }
-
-    setDetection({ status: "checking" });
 
     try {
       const client = createPublicClient({
@@ -91,7 +108,7 @@ export function DeveloperConfigPanel() {
 
       const [chainId, clientVersionResult] = await Promise.all([
         client.getChainId(),
-        client
+        (client as any)
           .request({
             method: "web3_clientVersion",
           })
@@ -106,7 +123,7 @@ export function DeveloperConfigPanel() {
       const appNetwork = known?.appNetwork || `chain-${chainId}`;
 
       if (!cleanMain) {
-        setDetection({
+        return {
           status: "error",
           message: "MainConnector address is empty.",
           chainId,
@@ -115,8 +132,7 @@ export function DeveloperConfigPanel() {
             typeof clientVersionResult === "string"
               ? clientVersionResult
               : undefined,
-        });
-        return;
+        };
       }
 
       const bytecode = await client.getBytecode({
@@ -124,7 +140,7 @@ export function DeveloperConfigPanel() {
       });
 
       if (!bytecode || bytecode === "0x") {
-        setDetection({
+        return {
           status: "error",
           message: "No contract bytecode at MainConnector address on this RPC.",
           chainId,
@@ -133,8 +149,7 @@ export function DeveloperConfigPanel() {
             typeof clientVersionResult === "string"
               ? clientVersionResult
               : undefined,
-        });
-        return;
+        };
       }
 
       try {
@@ -143,9 +158,9 @@ export function DeveloperConfigPanel() {
           abi: mainConnectorAbi,
           functionName: "getUserByAddress",
           args: [ZERO_ADDRESS],
-        });
+        } as any);
       } catch {
-        setDetection({
+        return {
           status: "error",
           message:
             "Contract exists, but does not respond like MainConnector on this network.",
@@ -155,11 +170,10 @@ export function DeveloperConfigPanel() {
             typeof clientVersionResult === "string"
               ? clientVersionResult
               : undefined,
-        });
-        return;
+        };
       }
 
-      setDetection({
+      return {
         status: "ok",
         chainId,
         chainName,
@@ -171,83 +185,55 @@ export function DeveloperConfigPanel() {
           typeof clientVersionResult === "string"
             ? clientVersionResult
             : undefined,
-        contractOk: true,
         contractMessage: "MainConnector verified.",
-      });
+      };
     } catch {
-      setDetection({
+      return {
         status: "error",
         message: "Cannot connect to RPC URL.",
-      });
+      };
     }
   }
 
+  async function detect() {
+    setDetection({ status: "checking" });
+
+    const result = await validateConfig({
+      rpcUrl,
+      mainConnectorAddress,
+    });
+
+    setDetection(result);
+
+    return result;
+  }
+
+  function contextFromDetection(result: OkDetection) {
+    return {
+      label: `${result.chainName} · ${shortAddress(mainConnectorAddress)}`,
+      rpcUrl: rpcUrl.trim(),
+      mainConnectorAddress: mainConnectorAddress.trim() as Address,
+      chainId: result.chainId,
+      chainName: result.chainName,
+      nativeCurrencyName: result.nativeCurrencyName,
+      nativeCurrencySymbol: result.nativeCurrencySymbol,
+      nativeCurrencyDecimals: result.nativeCurrencyDecimals,
+      appNetwork: result.appNetwork,
+    };
+  }
+
   async function save() {
-    await detect();
+    const result = await detect();
 
-    const cleanRpcUrl = rpcUrl.trim();
-    const cleanMain = mainConnectorAddress.trim();
-
-    if (detection.status !== "ok") {
-      // React state may not be updated yet after detect(), so run direct validation.
-      const client = createPublicClient({
-        transport: http(cleanRpcUrl),
-      });
-
-      try {
-        const chainId = await client.getChainId();
-        const known = getKnownChainMetadata(chainId);
-
-        if (!cleanMain || !isAddress(cleanMain)) {
-          alert("MainConnector address is invalid.");
-          return;
-        }
-
-        const bytecode = await client.getBytecode({
-          address: cleanMain as Address,
-        });
-
-        if (!bytecode || bytecode === "0x") {
-          alert("No contract bytecode at MainConnector address on this RPC.");
-          return;
-        }
-
-        await client.readContract({
-          address: cleanMain as Address,
-          abi: mainConnectorAbi,
-          functionName: "getUserByAddress",
-          args: [ZERO_ADDRESS],
-        });
-
-        saveMessengerRuntimeConfigOverride({
-          rpcUrl: cleanRpcUrl,
-          mainConnectorAddress: cleanMain as Address,
-          chainId,
-          chainName: known?.chainName || `Unknown chain ${chainId}`,
-          nativeCurrencyName: known?.nativeCurrencyName || "Ether",
-          nativeCurrencySymbol: known?.nativeCurrencySymbol || "ETH",
-          nativeCurrencyDecimals: known?.nativeCurrencyDecimals || 18,
-          appNetwork: known?.appNetwork || `chain-${chainId}`,
-        });
-
-        window.location.reload();
-        return;
-      } catch {
-        alert("Network or MainConnector validation failed.");
-        return;
-      }
+    if (result.status !== "ok") {
+      alert(result.status === "error" ? result.message : "Config validation failed.");
+      return;
     }
 
-    saveMessengerRuntimeConfigOverride({
-      rpcUrl: cleanRpcUrl,
-      mainConnectorAddress: cleanMain as Address,
-      chainId: detection.chainId,
-      chainName: detection.chainName,
-      nativeCurrencyName: detection.nativeCurrencyName,
-      nativeCurrencySymbol: detection.nativeCurrencySymbol,
-      nativeCurrencyDecimals: detection.nativeCurrencyDecimals,
-      appNetwork: detection.appNetwork,
-    });
+    const context = contextFromDetection(result);
+
+    saveMessengerRuntimeConfigOverride(context);
+    saveMessengerRuntimeContext(context);
 
     window.location.reload();
   }
@@ -255,6 +241,16 @@ export function DeveloperConfigPanel() {
   function reset() {
     resetMessengerRuntimeConfig();
     window.location.reload();
+  }
+
+  function switchToContext(context: SavedMessengerRuntimeContext) {
+    applySavedMessengerRuntimeContext(context);
+    window.location.reload();
+  }
+
+  function removeContext(id: string) {
+    deleteSavedMessengerRuntimeContext(id);
+    setSavedContexts(getSavedMessengerRuntimeContexts());
   }
 
   const shownChainId =
@@ -276,6 +272,7 @@ export function DeveloperConfigPanel() {
 
           if (!open) {
             void detect();
+            setSavedContexts(getSavedMessengerRuntimeContexts());
           }
         }}
       >
@@ -288,11 +285,55 @@ export function DeveloperConfigPanel() {
           <header>
             <div>
               <strong>Developer config</strong>
-              <span>Enter RPC URL and MainConnector. Network is detected.</span>
+              <span>Switch between saved RPC/MainConnector contexts.</span>
             </div>
 
             <button onClick={() => setOpen(false)}>×</button>
           </header>
+
+          {savedContexts.length > 0 && (
+            <section className="devSavedContexts">
+              <strong>Known contexts</strong>
+
+              <div className="devSavedContextList">
+                {savedContexts.map((context) => {
+                  const active =
+                    context.rpcUrl === current.rpcUrl &&
+                    context.mainConnectorAddress.toLowerCase() ===
+                      current.mainConnectorAddress.toLowerCase() &&
+                    context.chainId === current.chainId;
+
+                  return (
+                    <div
+                      key={context.id}
+                      className={`devSavedContext ${active ? "active" : ""}`}
+                    >
+                      <button onClick={() => switchToContext(context)}>
+                        <span>
+                          <strong>{context.chainName}</strong>
+                          <small>
+                            chain {context.chainId} ·{" "}
+                            {context.nativeCurrencySymbol}
+                          </small>
+                        </span>
+
+                        <code>{shortAddress(context.mainConnectorAddress)}</code>
+                        <em>{rpcLabel(context.rpcUrl)}</em>
+                      </button>
+
+                      <button
+                        className="devSavedContextDelete"
+                        onClick={() => removeContext(context.id)}
+                        title="Remove saved context"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <label>
             RPC URL
@@ -387,12 +428,7 @@ export function DeveloperConfigPanel() {
               Reset to defaults
             </button>
 
-            <button
-              className="ghostButton"
-              onClick={() => {
-                void detect();
-              }}
-            >
+            <button className="ghostButton" onClick={() => void detect()}>
               Check
             </button>
 

@@ -3733,3 +3733,97 @@ body:has(.identityShell),
 .devDetectedBox.error strong {
   color: rgba(255, 180, 180, 0.95);
 }
+
+.devSavedContexts {
+  display: grid;
+  gap: 8px;
+}
+
+.devSavedContexts > strong {
+  color: rgba(245, 247, 251, 0.9);
+  font-size: 12px;
+}
+
+.devSavedContextList {
+  display: grid;
+  gap: 7px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.devSavedContext {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 6px;
+  align-items: center;
+}
+
+.devSavedContext > button:first-child {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(245, 247, 251, 0.82);
+  border-radius: 14px;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.devSavedContext.active > button:first-child {
+  border-color: rgba(74, 163, 255, 0.36);
+  background: rgba(74, 163, 255, 0.12);
+}
+
+.devSavedContext span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.devSavedContext span strong,
+.devSavedContext span small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devSavedContext span strong {
+  font-size: 12px;
+}
+
+.devSavedContext span small {
+  color: rgba(245, 247, 251, 0.52);
+  font-size: 10.5px;
+}
+
+.devSavedContext code {
+  justify-self: end;
+  color: rgba(245, 247, 251, 0.66);
+  font-size: 10.5px;
+}
+
+.devSavedContext em {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: rgba(245, 247, 251, 0.42);
+  font-size: 10.5px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devSavedContextDelete {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 80, 80, 0.18);
+  background: rgba(255, 80, 80, 0.07);
+  color: rgba(255, 180, 180, 0.9);
+  border-radius: 10px;
+  cursor: pointer;
+}
