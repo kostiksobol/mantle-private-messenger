@@ -1,11 +1,15 @@
 import Dexie, { type Table } from "dexie";
 
-const appNetwork = import.meta.env.VITE_APP_NETWORK || "anvil";
+import { getMessengerRuntimeConfig } from "./runtimeConfig";
+
+const runtimeConfig = getMessengerRuntimeConfig();
+const appNetwork =
+  runtimeConfig.appNetwork || `chain-${runtimeConfig.chainId}`;
 const mainConnectorForDb = (
-  import.meta.env.VITE_MAIN_CONNECTOR_ADDRESS || "no-main-connector"
+  runtimeConfig.mainConnectorAddress || "no-main-connector"
 ).toLowerCase();
 
-const databaseName = `mantle-private-messenger:${appNetwork}:${mainConnectorForDb}`;
+const databaseName = `mantle-private-messenger:${appNetwork}:${runtimeConfig.chainId}:${mainConnectorForDb}`;
 
 export type SelfProfile = {
   id?: number;

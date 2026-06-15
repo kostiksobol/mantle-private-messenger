@@ -3580,3 +3580,156 @@ body:has(.identityShell),
     flex-direction: column;
   }
 }
+
+.devConfig {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 1200;
+}
+
+.devConfigToggle {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 12, 22, 0.78);
+  color: rgba(245, 247, 251, 0.82);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+}
+
+.devConfigToggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.devConfigPopover {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: min(420px, calc(100vw - 28px));
+  display: grid;
+  gap: 11px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(10, 14, 25, 0.96);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(20px);
+}
+
+.devConfigPopover header,
+.devConfigPopover footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.devConfigPopover header strong,
+.devConfigPopover header span {
+  display: block;
+}
+
+.devConfigPopover header span {
+  margin-top: 3px;
+  color: rgba(245, 247, 251, 0.54);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devConfigPopover header button {
+  border: 0;
+  background: transparent;
+  color: rgba(245, 247, 251, 0.68);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.devConfigPopover label {
+  display: grid;
+  gap: 6px;
+  color: rgba(245, 247, 251, 0.68);
+  font-size: 12px;
+}
+
+.devConfigPopover input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.devConfigDefaults {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(245, 247, 251, 0.58);
+}
+
+.devConfigDefaults strong {
+  color: rgba(245, 247, 251, 0.82);
+  font-size: 12px;
+}
+
+.devConfigDefaults code {
+  font-size: 11px;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.devDetectedLine {
+  color: rgba(245, 247, 251, 0.68);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.devDetectedLine strong {
+  color: rgba(245, 247, 251, 0.92);
+}
+
+.devDetectedBox {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(245, 247, 251, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.devDetectedBox strong {
+  color: rgba(245, 247, 251, 0.9);
+  font-size: 12px;
+}
+
+.devDetectedBox span {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devDetectedBox code {
+  font-size: 11px;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.devDetectedBox.ok {
+  background: rgba(40, 220, 150, 0.075);
+  border-color: rgba(40, 220, 150, 0.18);
+}
+
+.devDetectedBox.ok strong {
+  color: rgba(130, 255, 210, 0.92);
+}
+
+.devDetectedBox.error {
+  background: rgba(255, 80, 80, 0.075);
+  border-color: rgba(255, 80, 80, 0.2);
+}
+
+.devDetectedBox.error strong {
+  color: rgba(255, 180, 180, 0.95);
+}

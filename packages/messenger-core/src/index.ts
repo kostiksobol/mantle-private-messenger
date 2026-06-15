@@ -18,3 +18,5 @@ export * from "./messenger/writeActions";
 export * from "./protocol/payloads";
 
 export * from "./chain/transactionLayer";
+
+export * from "./runtimeConfig";

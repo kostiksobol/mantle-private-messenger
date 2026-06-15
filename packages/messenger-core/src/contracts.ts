@@ -1,7 +1,7 @@
 import type { Address } from "viem";
+import { getMessengerRuntimeConfig } from "./runtimeConfig";
 
-export const MAIN_CONNECTOR_ADDRESS =
-  import.meta.env.VITE_MAIN_CONNECTOR_ADDRESS as Address | undefined;
+export const MAIN_CONNECTOR_ADDRESS = getMessengerRuntimeConfig().mainConnectorAddress as Address | undefined;
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 

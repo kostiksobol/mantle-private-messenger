@@ -8,6 +8,7 @@ import type {
 } from "../hooks/useAppWallet";
 import type { IdentityRegistryProfile } from "../hooks/useIdentityRegistry";
 import type { LocalSignerAccount } from "../identity/localSignerAccounts";
+import { DeveloperConfigPanel } from "./DeveloperConfigPanel";
 
 async function copyAddress(address: string) {
   await navigator.clipboard.writeText(address);
@@ -191,6 +192,7 @@ export function UsersPage({
 
   return (
     <main className="identityShell">
+      <DeveloperConfigPanel />
       <section className="identityHero">
         <p className="eyebrow">Mantle Private Messenger</p>
         <p>
